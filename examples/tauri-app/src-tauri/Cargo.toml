@@ -1,0 +1,19 @@
+[package]
+name = "tauri-plugin-age-signals-example"
+version = "0.1.0"
+description = "Example Tauri app demonstrating the Age Signals plugin"
+authors = ["charlesportwoodii@erianna.com"]
+license = "BSD-3-Clause"
+edition = "2024"
+rust-version = "1.85.0"
+
+[lib]
+name = "tauri_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "^2", default-features = false }
+
+[dependencies]
+tauri = { version = "^2", features = [] }
+tauri-plugin-age-signals = { path = "../../../" }

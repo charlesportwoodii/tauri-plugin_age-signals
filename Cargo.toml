@@ -1,0 +1,19 @@
+[package]
+name = "tauri-plugin-age-signals"
+version = "0.1.0"
+authors = ["charlesportwoodii@erianna.com"]
+description = "Tauri v2 plugin for Apple DeclaredAgeRange and Android Play Age Signals"
+license = "BSD-3-Clause"
+edition = "2024"
+rust-version = "1.85.0"
+links = "tauri-plugin-age-signals"
+exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules"]
+
+[dependencies]
+tauri = { version = "^2" }
+serde = { version = "^1", features = ["derive"] }
+serde_json = "^1"
+thiserror = "^2"
+
+[build-dependencies]
+tauri-plugin = { version = "^2", features = ["build"] }

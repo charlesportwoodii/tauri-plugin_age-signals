@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Age Signals Plugin Demo</title>
+  </head>
+
+  <body>
+    <div id="app"></div>
+    <script>
+      // Polyfill for Android WebView < 85 (Android 11 emulators ship with ~v83)
+      if (!String.prototype.replaceAll) {
+        String.prototype.replaceAll = function(search, replacement) {
+          if (search instanceof RegExp) {
+            if (!search.global) throw new TypeError('replaceAll must be called with a global RegExp');
+            return this.replace(search, replacement);
+          }
+          return this.split(search).join(replacement);
+        };
+      }
+    </script>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
