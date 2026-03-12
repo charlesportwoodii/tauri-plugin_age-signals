@@ -36,15 +36,9 @@ dependencies {
     // Play Age Signals SDK
     implementation("com.google.android.play:age-signals:0.0.3")
 
-    // Unit testing
+    // Unit testing — runs locally with ./gradlew test, no device required
     testImplementation("junit:junit:4.13.2")
-
-    // Instrumented testing (includes FakeAgeSignalsManager)
-    androidTestImplementation("com.google.android.play:age-signals:0.0.3")
-    androidTestImplementation("androidx.test.ext:junit:1.1.5")
-    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
-    androidTestImplementation("androidx.test:runner:1.5.2")
-    androidTestImplementation("androidx.test:rules:1.5.0")
+    testImplementation("com.google.android.play:age-signals:0.0.3")
 
     implementation(project(":tauri-android"))
 }

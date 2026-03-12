@@ -1,7 +1,7 @@
 use serde::de::DeserializeOwned;
 use tauri::{
-    plugin::{PluginApi, PluginHandle},
     AppHandle, Runtime,
+    plugin::{PluginApi, PluginHandle},
 };
 
 use crate::{mapping::map_mobile_result, models::MobileAgeRangeResult};
@@ -34,7 +34,7 @@ impl<R: Runtime> AgeSignals<R> {
                 serde_json::json!({ "minimumAge": minimum_age }),
             )
             .await
-            .map_err(Into::into)?;
+            .map_err(crate::Error::from)?;
 
         map_mobile_result(result, minimum_age)
     }

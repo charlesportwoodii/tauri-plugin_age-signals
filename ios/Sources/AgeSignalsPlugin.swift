@@ -23,14 +23,14 @@ class AgeSignalsPlugin: Plugin {
         let args = try invoke.parseArgs(AgeRangeArgs.self)
         let minimumAge = args.minimumAge
 
-        Task {
+        Task { @MainActor in
             await self.performAgeCheck(invoke: invoke, minimumAge: minimumAge)
         }
     }
 
     private func performAgeCheck(invoke: Invoke, minimumAge: Int) async {
         #if canImport(DeclaredAgeRange)
-        guard #available(iOS 26, macOS 26, *) else {
+        guard #available(iOS 26.2, macOS 26, *) else {
             // iOS < 26: DeclaredAgeRange not available
             invoke.resolve(["state": "notApplicable"])
             return
@@ -67,6 +67,13 @@ class AgeSignalsPlugin: Plugin {
                     // lowerBound is set → person is AT or ABOVE the minimum age gate
                     invoke.resolve(["state": "inRange"])
                 }
+
+            @unknown default:
+                invoke.resolve([
+                    "state": "error",
+                    "errorCode": "unknownResponse",
+                    "errorMessage": "Unexpected AgeRangeService response"
+                ])
             }
         } catch {
             handleAgeRangeError(error: error, invoke: invoke)
@@ -78,7 +85,7 @@ class AgeSignalsPlugin: Plugin {
     }
 
     #if canImport(DeclaredAgeRange)
-    @available(iOS 26, macOS 26, *)
+    @available(iOS 26.2, macOS 26, *)
     private func handleAgeRangeError(error: Error, invoke: Invoke) {
         if let ageError = error as? AgeRangeService.Error {
             switch ageError {
@@ -88,21 +95,21 @@ class AgeSignalsPlugin: Plugin {
             case .invalidRequest:
                 invoke.resolve([
                     "state": "error",
-                    "code": "invalidRequest",
-                    "message": "Invalid age gate configuration — ensure minimumAge ≥ 2"
+                    "errorCode": "invalidRequest",
+                    "errorMessage": "Invalid age gate configuration — ensure minimumAge ≥ 2"
                 ])
             @unknown default:
                 invoke.resolve([
                     "state": "error",
-                    "code": "internalError",
-                    "message": error.localizedDescription
+                    "errorCode": "internalError",
+                    "errorMessage": error.localizedDescription
                 ])
             }
         } else {
             invoke.resolve([
                 "state": "error",
-                "code": "internalError",
-                "message": error.localizedDescription
+                "errorCode": "internalError",
+                "errorMessage": error.localizedDescription
             ])
         }
     }

@@ -25,10 +25,11 @@ let package = Package(
                 .byName(name: "Tauri")
             ],
             path: "Sources",
-            // DeclaredAgeRange is a system framework available on iOS 26+
-            // The #available(iOS 26, *) guard in code handles older OS gracefully
+            // DeclaredAgeRange is a system framework available on iOS 26+.
+            // Weak-linked so the plugin builds on older SDKs; all usage is already
+            // guarded by #available(iOS 26, *) at runtime.
             linkerSettings: [
-                .linkedFramework("DeclaredAgeRange", .when(platforms: [.iOS, .macOS]))
+                .unsafeFlags(["-weak_framework", "DeclaredAgeRange"], .when(platforms: [.iOS, .macOS]))
             ]
         ),
         .testTarget(

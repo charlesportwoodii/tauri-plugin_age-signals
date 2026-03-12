@@ -12,8 +12,9 @@ name = "tauri_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "^2", default-features = false }
+tauri-build = { version = "^2", default-features = false , features = [] }
 
 [dependencies]
 tauri = { version = "^2", features = [] }
+tauri-plugin-log = { version = "^2" }
 tauri-plugin-age-signals = { path = "../../../" }

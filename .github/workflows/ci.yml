@@ -1,0 +1,163 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  RUST_TOOLCHAIN: "1.85.0"
+  NDK_VERSION: "27.0.11902837"
+
+jobs:
+  validate:
+    name: Validate (Rust + JS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # tauri on Linux requires GTK/WebKit dev headers
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+
+      - name: Install JS dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all-features -- -D warnings
+
+      - name: Build
+        run: cargo build --all-features
+
+      - name: Test
+        run: cargo test --all-features
+
+      - name: Build JS
+        run: yarn build
+
+  android:
+    name: Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # tauri android init runs `cargo metadata` to discover plugins and generate
+      # tauri.settings.gradle + android/.tauri/tauri-api. Rust is required for this;
+      # no android targets are needed since we only run JVM unit tests (not cargo build).
+      - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+          cache-dependency-path: examples/tauri-app/yarn.lock
+
+      - name: Install frontend dependencies
+        run: yarn install --frozen-lockfile
+        working-directory: examples/tauri-app
+
+      # init runs cargo metadata to discover plugins, generates tauri.settings.gradle
+      # (plugin module list) and android/.tauri/tauri-api (Tauri Android SDK).
+      - name: Initialize Android project
+        run: yarn tauri android init
+        working-directory: examples/tauri-app
+
+      # Local JVM unit tests — no emulator, no device, no regulated-region account needed.
+      # Tests AgeSignalsMapper directly: all AgeSignalsVerificationStatus variants and all
+      # documented AgeSignalsException error codes (-1 through -10, -100).
+      - name: Run Android unit tests
+        run: ./gradlew :tauri-plugin-age-signals:test
+        working-directory: examples/tauri-app/src-tauri/gen/android
+
+  ios:
+    name: iOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust ${{ env.RUST_TOOLCHAIN }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+          cache-dependency-path: examples/tauri-app/yarn.lock
+
+      - name: Install frontend dependencies
+        run: yarn install --frozen-lockfile
+        working-directory: examples/tauri-app
+
+      # Validate that the plugin Rust code compiles for all iOS targets.
+      - name: Compile for iOS device (arm64)
+        run: cargo build --target aarch64-apple-ios
+
+      - name: Compile for iOS simulator (arm64)
+        run: cargo build --target aarch64-apple-ios-sim
+
+      - name: Compile for iOS simulator (x86_64)
+        run: cargo build --target x86_64-apple-ios
+
+      # yarn tauri ios init downloads the Tauri Swift SDK into src-tauri/.tauri/tauri-api.
+      # ios/Package.swift expects it one level up from ios/ (at <root>/.tauri/tauri-api),
+      # so we copy it there before running swift test.
+      - name: Initialize Tauri iOS project
+        run: yarn tauri ios init
+        working-directory: examples/tauri-app
+
+      # Locate the Tauri Swift SDK placed by 'yarn tauri ios init' — the exact path
+      # varies by Tauri version. ios/Package.swift always expects it at <root>/.tauri/tauri-api.
+      - name: Make Tauri Swift SDK available to ios/Package.swift
+        run: |
+          SDK=$(find . -path "*/.tauri/tauri-api" -type d 2>/dev/null | grep -v "/.git/" | head -1)
+          if [ -z "$SDK" ]; then
+            echo "::error::Tauri Swift SDK (.tauri/tauri-api) not found after init"
+            find . -name ".tauri" -type d 2>/dev/null | grep -v "/.git/" || echo "  (no .tauri dirs found)"
+            exit 1
+          fi
+          echo "Found Tauri Swift SDK at: $SDK"
+          mkdir -p .tauri
+          cp -r "$SDK" .tauri/tauri-api
+
+      # DeclaredAgeRange is now weakly linked so swift test compiles without iOS 26 SDK.
+      # All tests use protocol mocks — no real platform API is called.
+      - name: Run iOS Swift tests
+        run: swift test
+        working-directory: ios
