@@ -87,6 +87,11 @@ jobs:
         run: yarn install --frozen-lockfile
         working-directory: examples/tauri-app
 
+      # Init creates the Android project skeleton (gen/android/).
+      - name: Initialize Android project
+        run: yarn tauri android init
+        working-directory: examples/tauri-app
+
       # Full debug build: cross-compiles the Rust plugin for all Android targets and
       # runs Gradle, which generates tauri.settings.gradle + android/.tauri/tauri-api.
       - name: Build Android example app
