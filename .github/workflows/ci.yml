@@ -119,18 +119,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 25
-          cache: yarn
-          cache-dependency-path: examples/tauri-app/yarn.lock
-
-      - name: Install frontend dependencies
-        run: yarn install --frozen-lockfile
-        working-directory: examples/tauri-app
-
-      # Compiling for iOS targets triggers tauri-build, which populates the
-      # Tauri Swift SDK at the path that tauri ios init expects to find it.
+      # Validate that the plugin Rust code compiles for all iOS targets.
       - name: Compile for iOS device (arm64)
         run: cargo build --target aarch64-apple-ios
 
@@ -140,29 +129,9 @@ jobs:
       - name: Compile for iOS simulator (x86_64)
         run: cargo build --target x86_64-apple-ios
 
-      # yarn tauri ios init downloads the Tauri Swift SDK into src-tauri/.tauri/tauri-api.
-      # ios/Package.swift expects it one level up from ios/ (at <root>/.tauri/tauri-api),
-      # so we copy it there before running swift test.
-      - name: Initialize Tauri iOS project
-        run: yarn tauri ios init
-        working-directory: examples/tauri-app
-
-      # Locate the Tauri Swift SDK placed by 'yarn tauri ios init' — the exact path
-      # varies by Tauri version. ios/Package.swift always expects it at <root>/.tauri/tauri-api.
-      - name: Make Tauri Swift SDK available to ios/Package.swift
-        run: |
-          SDK=$(find . -path "*/.tauri/tauri-api" -type d 2>/dev/null | grep -v "/.git/" | head -1)
-          if [ -z "$SDK" ]; then
-            echo "::error::Tauri Swift SDK (.tauri/tauri-api) not found after init"
-            find . -name ".tauri" -type d 2>/dev/null | grep -v "/.git/" || echo "  (no .tauri dirs found)"
-            exit 1
-          fi
-          echo "Found Tauri Swift SDK at: $SDK"
-          mkdir -p .tauri
-          cp -r "$SDK" .tauri/tauri-api
-
-      # DeclaredAgeRange is now weakly linked so swift test compiles without iOS 26 SDK.
-      # All tests use protocol mocks — no real platform API is called.
+      # ios/Tests/Package.swift is a standalone package with no Tauri/UIKit dependency.
+      # swift test here only compiles the self-contained test file (all mock types
+      # are defined inline; only XCTest is imported), so it compiles cleanly on macOS.
       - name: Run iOS Swift tests
         run: swift test
-        working-directory: ios
+        working-directory: ios/Tests

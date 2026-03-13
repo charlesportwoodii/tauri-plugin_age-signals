@@ -32,14 +32,5 @@ let package = Package(
                 .unsafeFlags(["-weak_framework", "DeclaredAgeRange"], .when(platforms: [.iOS, .macOS]))
             ]
         ),
-        // The test file is fully self-contained (all mock types defined inline,
-        // only XCTest imported). No dependency on the plugin target — that would
-        // transitively pull in the Tauri SDK which imports UIKit, preventing
-        // swift test from compiling on macOS runners.
-        .testTarget(
-            name: "AgeSignalsPluginTests",
-            dependencies: [],
-            path: "Tests/AgeSignalsPluginTests"
-        )
     ]
 )
