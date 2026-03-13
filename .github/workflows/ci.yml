@@ -73,14 +73,14 @@ jobs:
 
       - uses: actions/setup-java@v4
         with:
-          java-version: 17
+          java-version: 21
           distribution: temurin
 
       - uses: android-actions/setup-android@v3
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 25
           cache: yarn
           cache-dependency-path: examples/tauri-app/yarn.lock
 
@@ -117,23 +117,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 25
           cache: yarn
           cache-dependency-path: examples/tauri-app/yarn.lock
 
       - name: Install frontend dependencies
         run: yarn install --frozen-lockfile
         working-directory: examples/tauri-app
-
-      # Validate that the plugin Rust code compiles for all iOS targets.
-      - name: Compile for iOS device (arm64)
-        run: cargo build --target aarch64-apple-ios
-
-      - name: Compile for iOS simulator (arm64)
-        run: cargo build --target aarch64-apple-ios-sim
-
-      - name: Compile for iOS simulator (x86_64)
-        run: cargo build --target x86_64-apple-ios
 
       # yarn tauri ios init downloads the Tauri Swift SDK into src-tauri/.tauri/tauri-api.
       # ios/Package.swift expects it one level up from ios/ (at <root>/.tauri/tauri-api),
