@@ -1,5 +1,5 @@
-use tauri_plugin_log::log::info;
 use tauri::{AppHandle, Runtime, command};
+use tauri_plugin_log::log::info;
 
 use crate::AgeSignalsExt;
 
