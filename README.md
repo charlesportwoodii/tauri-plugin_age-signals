@@ -331,7 +331,7 @@ Desktop platforms (macOS, Windows, Linux) are not subject to mobile age signal r
 
 ### Rust Unit Tests
 
-The plugin includes unit tests for the core mapping logic (11 tests total covering all result paths). Run them with:
+The plugin includes unit tests for the core mapping logic (9 tests total covering all result paths). Run them with:
 
 ```bash
 # From the plugin root
@@ -346,7 +346,7 @@ cargo test desktop::tests
 ```
 
 Tests are in:
-- `src/mapping.rs` — 10 tests covering all Android/iOS result state → Rust type mappings
+- `src/mapping.rs` — 8 tests covering all Android/iOS result state → Rust type mappings
 - `src/desktop.rs` — 1 test verifying desktop always returns `NotApplicable`
 
 ### Android Unit Tests
