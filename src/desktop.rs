@@ -1,6 +1,8 @@
 use serde::de::DeserializeOwned;
 use tauri::{AppHandle, Runtime, plugin::PluginApi};
 
+use crate::models::AgeSignal;
+
 pub fn init<R: Runtime, C: DeserializeOwned>(
     app: &AppHandle<R>,
     _api: PluginApi<R, C>,
@@ -11,32 +13,21 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
 pub struct AgeSignals<R: Runtime>(AppHandle<R>);
 
 impl<R: Runtime> AgeSignals<R> {
-    pub async fn check_age_range(&self, _minimum_age: u8) -> crate::Result<Option<bool>> {
+    pub async fn age_signal(&self, _minimum_age: u8) -> crate::Result<AgeSignal> {
         // Desktop platforms are not subject to age signal regulation
-        Ok(None)
+        Ok(AgeSignal::NotApplicable)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn desktop_always_returns_none() {
-        // Verify the logic: desktop always returns Ok(None) regardless of age
-        // We test the mapping logic directly since we can't construct AppHandle in tests
-        let result: crate::Result<Option<bool>> = Ok(None);
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
-    }
+    use crate::models::AgeSignal;
 
     #[test]
-    fn desktop_returns_none_for_zero_age() {
-        let result: crate::Result<Option<bool>> = Ok(None);
-        assert_eq!(result.unwrap(), None);
-    }
-
-    #[test]
-    fn desktop_returns_none_for_max_age() {
-        let result: crate::Result<Option<bool>> = Ok(None);
-        assert_eq!(result.unwrap(), None);
+    fn desktop_always_returns_not_applicable() {
+        // Desktop always returns NotApplicable regardless of age. We assert the logic
+        // directly since we can't construct an AppHandle in a unit test.
+        let result: crate::Result<AgeSignal> = Ok(AgeSignal::NotApplicable);
+        assert_eq!(result.unwrap(), AgeSignal::NotApplicable);
     }
 }

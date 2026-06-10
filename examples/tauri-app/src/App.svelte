@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { checkAgeRange } from 'tauri-plugin-age-signals'
+  import { ageSignal } from 'tauri-plugin-age-signals'
   import type { AgeSignalsError } from 'tauri-plugin-age-signals'
 
   const MINIMUM_AGE = 13;
@@ -35,22 +35,24 @@
     errorType = '';
 
     try {
-      const result = await checkAgeRange(MINIMUM_AGE);
+      const result = await ageSignal(MINIMUM_AGE);
 
-      if (result === true) {
-        state = 'eligible';
-      } else {
-        // null: not applicable in this region/platform
-        state = 'not_applicable';
+      switch (result) {
+        case 'meetsAgeGate':
+          state = 'eligible';
+          break;
+        case 'belowAgeGate':
+          state = 'below_age';
+          break;
+        case 'notApplicable':
+          // No usable signal in this region/platform
+          state = 'not_applicable';
+          break;
       }
     } catch (err: unknown) {
       const e = err as AgeSignalsError;
 
-      if (e.type === 'BelowMinimumAge') {
-        state = 'below_age';
-        errorType = 'BelowMinimumAge';
-        errorMessage = `User is below the minimum age of ${(e as { type: 'BelowMinimumAge'; data: { minimum_age: number } }).data.minimum_age}.`;
-      } else if (e.type === 'NetworkError') {
+      if (e.type === 'NetworkError') {
         state = 'error';
         errorType = 'NetworkError';
         errorMessage = `Network error — check your connection and try again.`;

@@ -17,53 +17,64 @@ internal sealed class AgeSignalsState {
 internal object AgeSignalsMapper {
 
     fun mapResult(result: AgeSignalsResult, minimumAge: Int): AgeSignalsState {
-        val status = result.userStatus()
+        when (result.userStatus()) {
+            // null  = not in a regulated region (the law does not apply here).
+            // UNKNOWN = regulated region, but Play has no age data for this user.
+            // Neither yields a usable signal → the caller applies its own default policy.
+            null, AgeSignalsVerificationStatus.UNKNOWN ->
+                return AgeSignalsState.NotApplicable
+
+            // Active supervised account managed/approved by a guardian. Parental consent
+            // permits use regardless of the child's own age.
+            AgeSignalsVerificationStatus.SUPERVISED ->
+                return AgeSignalsState.InRange
+
+            // A guardian approval is required and is not currently granted (awaiting a
+            // decision, or explicitly denied) → block until resolved.
+            AgeSignalsVerificationStatus.SUPERVISED_APPROVAL_PENDING,
+            AgeSignalsVerificationStatus.SUPERVISED_APPROVAL_DENIED ->
+                return AgeSignalsState.BelowMinimumAge(minimumAge)
+
+            // VERIFIED / DECLARED carry a real age range → decide on the bounds below.
+            else -> {}
+        }
+
         val ageLower = result.ageLower()
         val ageUpper = result.ageUpper()
 
-        // null = not in applicable region; UNKNOWN = in applicable region but age unknown
-        // Both cases cannot confirm an age → not applicable
-        if (status == null || status == AgeSignalsVerificationStatus.UNKNOWN) {
-            return AgeSignalsState.NotApplicable
-        }
-
-        // Supervised account that was explicitly denied by parent
-        if (status == AgeSignalsVerificationStatus.SUPERVISED_APPROVAL_DENIED) {
-            return AgeSignalsState.BelowMinimumAge(minimumAge)
-        }
-
-        // User is confirmed at or above minimum age
+        // Confirmed at or above the minimum age.
         if (ageLower != null && ageLower >= minimumAge) {
             return AgeSignalsState.InRange
         }
 
-        // User is confirmed below minimum age (upper bound known and below threshold)
+        // Confirmed below the minimum age (upper bound known and below threshold).
         if (ageUpper != null && ageUpper < minimumAge) {
             return AgeSignalsState.BelowMinimumAge(minimumAge)
         }
 
-        // Range spans the threshold — conservative: grant access
+        // Range spans the threshold — conservative: grant access.
         return AgeSignalsState.InRange
     }
 
     fun mapException(exception: Exception): AgeSignalsState {
         if (exception is AgeSignalsException) {
             return when (exception.errorCode) {
+                // -3 = NETWORK_ERROR: transient — caller may retry.
                 -3 -> AgeSignalsState.Error("networkError", "Network error: ${exception.message}")
-                -2 -> AgeSignalsState.Error("playStoreNotFound", "Play Store not found")
-                -9 -> AgeSignalsState.Error("appNotOwned", "App not installed via Play Store")
-                // -1 = API_NOT_AVAILABLE: service connected but no age data for this app.
-                // In production (non-regulated regions) the success callback fires with null
-                // userStatus instead. For dev/sideloaded builds without Play Console config
-                // this fires because the app is unknown to the age signals service.
-                -1 -> AgeSignalsState.NotApplicable
-                -4, -5, -6, -7, -8 ->
-                    AgeSignalsState.Error("apiNotAvailable", "API not available: ${exception.message}")
-                // -10 = SDK_VERSION_OUTDATED: the age-signals library in this APK is too old
-                -10 -> AgeSignalsState.Error("apiNotAvailable", "Age Signals SDK version is outdated")
-                // -100 = INTERNAL_ERROR: unexpected Play Store internal error
+                // -100 = INTERNAL_ERROR: unexpected Play Store internal error.
                 -100 -> AgeSignalsState.Error("internalError", exception.message ?: "Internal error")
-                // Any other unrecognised code: feature not applicable for this user/region
+                // All remaining codes represent environmental conditions the caller cannot
+                // fix at runtime (Play Store missing, API outdated, app sideloaded, etc.).
+                // These are equivalent to "age signals not available" → NotApplicable.
+                //   -1  = API_NOT_AVAILABLE
+                //   -2  = PLAY_STORE_NOT_FOUND
+                //   -4  = PLAY_SERVICES_NOT_FOUND
+                //   -5  = CANNOT_BIND_TO_SERVICE
+                //   -6  = PLAY_STORE_VERSION_OUTDATED
+                //   -7  = PLAY_SERVICES_VERSION_OUTDATED
+                //   -8  = CLIENT_TRANSIENT_ERROR
+                //   -9  = APP_NOT_OWNED
+                //   -10 = SDK_VERSION_OUTDATED
                 else -> AgeSignalsState.NotApplicable
             }
         }

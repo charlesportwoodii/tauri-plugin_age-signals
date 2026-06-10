@@ -14,8 +14,94 @@ import DeclaredAgeRange
 #endif
 
 class AgeRangeArgs: Decodable {
-    var minimumAge: Int = 13
+    var minimumAge: Int = 0
 }
+
+// MARK: - Bridge state (mirrors Android's AgeSignalsState)
+
+internal enum AgeSignalsState {
+    case inRange
+    case notApplicable
+    case belowMinimumAge(minimumAge: Int)
+    case error(code: String, message: String)
+
+    func toJSObject() -> [String: Any] {
+        switch self {
+        case .inRange:
+            return ["state": "inRange"]
+        case .notApplicable:
+            return ["state": "notApplicable"]
+        case .belowMinimumAge(let minimumAge):
+            return ["state": "belowMinimumAge", "minimumAge": minimumAge]
+        case .error(let code, let message):
+            return ["state": "error", "errorCode": code, "errorMessage": message]
+        }
+    }
+}
+
+// MARK: - Mapper (mirrors Android's AgeSignalsMapper)
+
+internal enum AgeSignalsMapper {
+
+    #if canImport(DeclaredAgeRange)
+    @available(iOS 26.2, macOS 26, *)
+    static func mapResponse(_ response: AgeRangeService.Response, minimumAge: Int) -> AgeSignalsState {
+        switch response {
+        case .declinedSharing:
+            return .notApplicable
+
+        case .sharing(let range):
+            return mapAgeRange(range, minimumAge: minimumAge)
+
+        @unknown default:
+            return .error(code: "unknownResponse", message: "Unexpected AgeRangeService response")
+        }
+    }
+
+    @available(iOS 26.2, macOS 26, *)
+    static func mapAgeRange(_ range: AgeRangeService.AgeRange, minimumAge: Int) -> AgeSignalsState {
+        let ageLower = range.lowerBound
+        let ageUpper = range.upperBound
+
+        // Confirmed at or above the minimum age.
+        if let lower = ageLower, lower >= minimumAge {
+            return .inRange
+        }
+
+        // Confirmed below the minimum age (upper bound known and below threshold).
+        if let upper = ageUpper, upper < minimumAge {
+            return .belowMinimumAge(minimumAge: minimumAge)
+        }
+
+        // lowerBound == nil means the person is below the lowest age gate.
+        if ageLower == nil {
+            return .belowMinimumAge(minimumAge: minimumAge)
+        }
+
+        // Range spans the threshold — conservative: grant access.
+        return .inRange
+    }
+
+    @available(iOS 26.2, macOS 26, *)
+    static func mapError(_ error: Error) -> AgeSignalsState {
+        if let ageError = error as? AgeRangeService.Error {
+            switch ageError {
+            case .notAvailable:
+                // Service not available (missing Apple Account, device setup issue)
+                return .notApplicable
+            case .invalidRequest:
+                return .error(code: "invalidRequest",
+                              message: "Invalid age gate configuration — ensure minimumAge ≥ 2")
+            @unknown default:
+                return .error(code: "internalError", message: error.localizedDescription)
+            }
+        }
+        return .error(code: "internalError", message: error.localizedDescription)
+    }
+    #endif
+}
+
+// MARK: - Plugin
 
 class AgeSignalsPlugin: Plugin {
 
@@ -31,16 +117,14 @@ class AgeSignalsPlugin: Plugin {
     private func performAgeCheck(invoke: Invoke, minimumAge: Int) async {
         #if canImport(DeclaredAgeRange)
         guard #available(iOS 26.2, macOS 26, *) else {
-            // iOS < 26: DeclaredAgeRange not available
-            invoke.resolve(["state": "notApplicable"])
+            invoke.resolve(AgeSignalsState.notApplicable.toJSObject())
             return
         }
 
         do {
             let eligible = try await AgeRangeService.shared.isEligibleForAgeFeatures
             guard eligible else {
-                // Not in a regulated region — age signals not required
-                invoke.resolve(["state": "notApplicable"])
+                invoke.resolve(AgeSignalsState.notApplicable.toJSObject())
                 return
             }
 
@@ -50,74 +134,16 @@ class AgeSignalsPlugin: Plugin {
                 in: vc
             )
 
-            switch response {
-            case .declinedSharing:
-                // User is in a non-regulated region and declined to share
-                invoke.resolve(["state": "notApplicable"])
-
-            case .sharing(let ageRange):
-                if ageRange.lowerBound == nil {
-                    // lowerBound == nil means person is BELOW the lowest age gate
-                    // i.e., they are under minimumAge
-                    invoke.resolve([
-                        "state": "belowMinimumAge",
-                        "minimumAge": minimumAge
-                    ])
-                } else {
-                    // lowerBound is set → person is AT or ABOVE the minimum age gate
-                    invoke.resolve(["state": "inRange"])
-                }
-
-            @unknown default:
-                invoke.resolve([
-                    "state": "error",
-                    "errorCode": "unknownResponse",
-                    "errorMessage": "Unexpected AgeRangeService response"
-                ])
-            }
+            let state = AgeSignalsMapper.mapResponse(response, minimumAge: minimumAge)
+            invoke.resolve(state.toJSObject())
         } catch {
-            handleAgeRangeError(error: error, invoke: invoke)
+            let state = AgeSignalsMapper.mapError(error)
+            invoke.resolve(state.toJSObject())
         }
         #else
-        // DeclaredAgeRange framework not available in this SDK
-        invoke.resolve(["state": "notApplicable"])
+        invoke.resolve(AgeSignalsState.notApplicable.toJSObject())
         #endif
     }
-
-    #if canImport(DeclaredAgeRange)
-    @available(iOS 26.2, macOS 26, *)
-    private func handleAgeRangeError(error: Error, invoke: Invoke) {
-        if let ageError = error as? AgeRangeService.Error {
-            switch ageError {
-            case .notAvailable:
-                // Service not available (missing Apple Account, device setup issue)
-                invoke.resolve(["state": "notApplicable"])
-            case .invalidRequest:
-                invoke.resolve([
-                    "state": "error",
-                    "errorCode": "invalidRequest",
-                    "errorMessage": "Invalid age gate configuration — ensure minimumAge ≥ 2"
-                ])
-            @unknown default:
-                invoke.resolve([
-                    "state": "error",
-                    "errorCode": "internalError",
-                    "errorMessage": error.localizedDescription
-                ])
-            }
-        } else {
-            invoke.resolve([
-                "state": "error",
-                "errorCode": "internalError",
-                "errorMessage": error.localizedDescription
-            ])
-        }
-    }
-    #else
-    private func handleAgeRangeError(error: Error, invoke: Invoke) {
-        invoke.resolve(["state": "notApplicable"])
-    }
-    #endif
 
     private func rootViewController() -> UIViewController {
         UIApplication.shared

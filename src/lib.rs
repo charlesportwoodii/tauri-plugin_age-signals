@@ -14,6 +14,7 @@ mod mapping;
 mod models;
 
 pub use error::{Error, Result};
+pub use models::AgeSignal;
 
 #[cfg(desktop)]
 use desktop::AgeSignals;
@@ -34,7 +35,7 @@ impl<R: Runtime, T: Manager<R>> crate::AgeSignalsExt<R> for T {
 /// Initializes the plugin.
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("age-signals")
-        .invoke_handler(tauri::generate_handler![commands::check_age_range])
+        .invoke_handler(tauri::generate_handler![commands::age_signal])
         .setup(|app, api| {
             #[cfg(mobile)]
             let age_signals = mobile::init(app, api)?;

@@ -52,7 +52,10 @@ private fun AgeSignalsState.toJSObject(): JSObject = when (this) {
     }
     is AgeSignalsState.Error -> JSObject().apply {
         put("state", "error")
-        put("code", code)
-        put("message", message)
+        // Keys must match the Rust MobileAgeRangeResult DTO (serde camelCase) and the
+        // iOS bridge: errorCode / errorMessage. Plain code/message would deserialize to
+        // null and collapse every error into InternalError.
+        put("errorCode", code)
+        put("errorMessage", message)
     }
 }

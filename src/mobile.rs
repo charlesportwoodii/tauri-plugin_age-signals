@@ -4,7 +4,10 @@ use tauri::{
     plugin::{PluginApi, PluginHandle},
 };
 
-use crate::{mapping::map_mobile_result, models::MobileAgeRangeResult};
+use crate::{
+    mapping::map_mobile_result,
+    models::{AgeSignal, MobileAgeRangeResult},
+};
 
 #[cfg(target_os = "ios")]
 tauri::ios_plugin_binding!(init_plugin_age_signals);
@@ -26,7 +29,7 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
 pub struct AgeSignals<R: Runtime>(PluginHandle<R>);
 
 impl<R: Runtime> AgeSignals<R> {
-    pub async fn check_age_range(&self, minimum_age: u8) -> crate::Result<Option<bool>> {
+    pub async fn age_signal(&self, minimum_age: u8) -> crate::Result<AgeSignal> {
         let result: MobileAgeRangeResult = self
             .0
             .run_mobile_plugin_async(
@@ -36,6 +39,6 @@ impl<R: Runtime> AgeSignals<R> {
             .await
             .map_err(crate::Error::from)?;
 
-        map_mobile_result(result, minimum_age)
+        map_mobile_result(result)
     }
 }

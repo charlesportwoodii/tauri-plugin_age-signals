@@ -1,18 +1,18 @@
+use log::info;
 use tauri::{AppHandle, Runtime, command};
-use tauri_plugin_log::log::info;
 
-use crate::AgeSignalsExt;
+use crate::{AgeSignalsExt, models::AgeSignal};
 
 #[command]
-pub(crate) async fn check_age_range<R: Runtime>(
+pub(crate) async fn age_signal<R: Runtime>(
     app: AppHandle<R>,
     minimum_age: u8,
-) -> crate::Result<Option<bool>> {
-    info!("check_age_range called with minimum_age={minimum_age}");
-    let result = app.age_signals().check_age_range(minimum_age).await;
+) -> crate::Result<AgeSignal> {
+    info!("age_signal called with minimum_age={minimum_age}");
+    let result = app.age_signals().age_signal(minimum_age).await;
     match &result {
-        Ok(value) => info!("check_age_range result: Ok({value:?})"),
-        Err(e) => info!("check_age_range result: Err({e})"),
+        Ok(value) => info!("age_signal result: Ok({value:?})"),
+        Err(e) => info!("age_signal result: Err({e})"),
     }
     result
 }
