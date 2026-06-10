@@ -4,18 +4,19 @@
 import XCTest
 
 // We test the pure mapping logic independently of the Tauri plugin framework.
-// Since AgeRangeService.shared is a system service, we use a protocol-based
-// mock approach to exercise all response paths.
+// Since AgeRangeService.shared is a system service, we use mock types that
+// mirror Apple's DeclaredAgeRange types and duplicate the mapper logic from
+// AgeSignalsPlugin.swift so it can be verified on any host platform.
 
-#if canImport(DeclaredAgeRange)
-import DeclaredAgeRange
-#endif
+// MARK: - Mock types (mirror Apple's DeclaredAgeRange types)
 
-// MARK: - Mock types for testing (protocol-based)
+struct MockAgeRange {
+    var lowerBound: Int?
+    var upperBound: Int?
+}
 
-/// The response type we simulate from AgeRangeService
 enum MockAgeRangeResponse {
-    case sharing(lowerBound: Int?, upperBound: Int?)
+    case sharing(range: MockAgeRange)
     case declinedSharing
 }
 
@@ -24,38 +25,72 @@ enum MockAgeRangeServiceError: Error {
     case invalidRequest
 }
 
-// MARK: - Pure mapping logic under test
+// MARK: - AgeSignalsState (mirrors production AgeSignalsState)
 
-/// Mirror of the plugin's mapping logic — extracted for testability.
-enum AgeRangeState: Equatable {
+enum AgeSignalsState: Equatable {
     case inRange
     case notApplicable
-    case belowMinimumAge(Int)
-    case error(String)
-}
+    case belowMinimumAge(minimumAge: Int)
+    case error(code: String, message: String)
 
-func mapMockResponse(
-    _ response: MockAgeRangeResponse,
-    minimumAge: Int
-) -> AgeRangeState {
-    switch response {
-    case .declinedSharing:
-        return .notApplicable
-    case .sharing(let lowerBound, _):
-        if lowerBound == nil {
-            return .belowMinimumAge(minimumAge)
-        } else {
-            return .inRange
+    func toJSObject() -> [String: Any] {
+        switch self {
+        case .inRange:
+            return ["state": "inRange"]
+        case .notApplicable:
+            return ["state": "notApplicable"]
+        case .belowMinimumAge(let minimumAge):
+            return ["state": "belowMinimumAge", "minimumAge": minimumAge]
+        case .error(let code, let message):
+            return ["state": "error", "errorCode": code, "errorMessage": message]
         }
     }
 }
 
-func mapMockError(_ error: MockAgeRangeServiceError) -> AgeRangeState {
-    switch error {
-    case .notAvailable:
-        return .notApplicable
-    case .invalidRequest:
-        return .error("invalidRequest")
+// MARK: - AgeSignalsMapper (mirrors production AgeSignalsMapper)
+
+enum AgeSignalsMapper {
+
+    static func mapResponse(_ response: MockAgeRangeResponse, minimumAge: Int) -> AgeSignalsState {
+        switch response {
+        case .declinedSharing:
+            return .notApplicable
+        case .sharing(let range):
+            return mapAgeRange(range, minimumAge: minimumAge)
+        }
+    }
+
+    static func mapAgeRange(_ range: MockAgeRange, minimumAge: Int) -> AgeSignalsState {
+        let ageLower = range.lowerBound
+        let ageUpper = range.upperBound
+
+        // Confirmed at or above the minimum age.
+        if let lower = ageLower, lower >= minimumAge {
+            return .inRange
+        }
+
+        // Confirmed below the minimum age (upper bound known and below threshold).
+        if let upper = ageUpper, upper < minimumAge {
+            return .belowMinimumAge(minimumAge: minimumAge)
+        }
+
+        // lowerBound == nil means the person is below the lowest age gate.
+        if ageLower == nil {
+            return .belowMinimumAge(minimumAge: minimumAge)
+        }
+
+        // Range spans the threshold — conservative: grant access.
+        return .inRange
+    }
+
+    static func mapError(_ error: MockAgeRangeServiceError) -> AgeSignalsState {
+        switch error {
+        case .notAvailable:
+            return .notApplicable
+        case .invalidRequest:
+            return .error(code: "invalidRequest",
+                          message: "Invalid age gate configuration — ensure minimumAge ≥ 2")
+        }
     }
 }
 
@@ -63,99 +98,148 @@ func mapMockError(_ error: MockAgeRangeServiceError) -> AgeRangeState {
 
 final class AgeSignalsPluginTests: XCTestCase {
 
-    // ---- iOS availability guard ----
+    let minimumAge = 13
+
+    // ---- Platform availability guards ----
 
     func test_notApplicable_when_platform_not_available() {
-        // Simulates the #available(iOS 26, *) guard failing
-        // On iOS < 26 the plugin returns notApplicable
-        let state: AgeRangeState = .notApplicable
+        // iOS < 26: DeclaredAgeRange framework not available → notApplicable
+        let state: AgeSignalsState = .notApplicable
         XCTAssertEqual(state, .notApplicable)
     }
 
     func test_notApplicable_when_not_eligible() {
         // isEligibleForAgeFeatures == false → notApplicable
-        let state: AgeRangeState = .notApplicable
+        let state: AgeSignalsState = .notApplicable
         XCTAssertEqual(state, .notApplicable)
     }
 
-    // ---- declinedSharing ----
+    // ---- declinedSharing (user declined to share age) ----
 
     func test_declined_sharing_returns_notApplicable() {
         let response = MockAgeRangeResponse.declinedSharing
-        let state = mapMockResponse(response, minimumAge: 13)
+        let state = AgeSignalsMapper.mapResponse(response, minimumAge: minimumAge)
         XCTAssertEqual(state, .notApplicable)
     }
 
-    // ---- sharing with lowerBound == nil (below minimum age) ----
+    // ---- sharing: confirmed at or above minimum age ----
 
-    func test_sharing_nil_lowerBound_returns_belowMinimumAge_13() {
-        let response = MockAgeRangeResponse.sharing(lowerBound: nil, upperBound: nil)
-        let state = mapMockResponse(response, minimumAge: 13)
-        XCTAssertEqual(state, .belowMinimumAge(13))
+    func test_sharing_lowerBound_at_minimum_returns_inRange() {
+        // Person at exactly the minimum age: lowerBound == minimumAge
+        let response = MockAgeRangeResponse.sharing(
+            range: MockAgeRange(lowerBound: 13, upperBound: nil))
+        let state = AgeSignalsMapper.mapResponse(response, minimumAge: minimumAge)
+        XCTAssertEqual(state, .inRange)
+    }
+
+    func test_sharing_lowerBound_above_minimum_returns_inRange() {
+        // Adult (18+) checked against gate of 13
+        let response = MockAgeRangeResponse.sharing(
+            range: MockAgeRange(lowerBound: 18, upperBound: nil))
+        let state = AgeSignalsMapper.mapResponse(response, minimumAge: minimumAge)
+        XCTAssertEqual(state, .inRange)
+    }
+
+    func test_sharing_lowerBound_13_upperBound_15_returns_inRange() {
+        // Range 13-15 checked against gate of 13
+        let response = MockAgeRangeResponse.sharing(
+            range: MockAgeRange(lowerBound: 13, upperBound: 15))
+        let state = AgeSignalsMapper.mapResponse(response, minimumAge: minimumAge)
+        XCTAssertEqual(state, .inRange)
+    }
+
+    // ---- sharing: confirmed below minimum age ----
+
+    func test_sharing_nil_lowerBound_returns_belowMinimumAge() {
+        // lowerBound == nil: person is below the lowest age gate
+        let response = MockAgeRangeResponse.sharing(
+            range: MockAgeRange(lowerBound: nil, upperBound: 11))
+        let state = AgeSignalsMapper.mapResponse(response, minimumAge: minimumAge)
+        XCTAssertEqual(state, .belowMinimumAge(minimumAge: 13))
     }
 
     func test_sharing_nil_lowerBound_returns_belowMinimumAge_18() {
-        let response = MockAgeRangeResponse.sharing(lowerBound: nil, upperBound: nil)
-        let state = mapMockResponse(response, minimumAge: 18)
-        XCTAssertEqual(state, .belowMinimumAge(18))
+        // Same logic with a higher gate
+        let response = MockAgeRangeResponse.sharing(
+            range: MockAgeRange(lowerBound: nil, upperBound: 16))
+        let state = AgeSignalsMapper.mapResponse(response, minimumAge: 18)
+        XCTAssertEqual(state, .belowMinimumAge(minimumAge: 18))
     }
 
-    // ---- sharing with lowerBound set (at or above minimum age) ----
+    func test_sharing_upperBound_below_minimum_returns_belowMinimumAge() {
+        // Upper bound confirmed below threshold (e.g. verified 0-12 against gate 13)
+        let response = MockAgeRangeResponse.sharing(
+            range: MockAgeRange(lowerBound: 0, upperBound: 12))
+        let state = AgeSignalsMapper.mapResponse(response, minimumAge: minimumAge)
+        XCTAssertEqual(state, .belowMinimumAge(minimumAge: 13))
+    }
 
-    func test_sharing_lowerBound_13_returns_inRange_for_threshold_13() {
-        let response = MockAgeRangeResponse.sharing(lowerBound: 13, upperBound: nil)
-        let state = mapMockResponse(response, minimumAge: 13)
+    func test_sharing_range_13_15_below_gate_18_returns_belowMinimumAge() {
+        // Range 13-15 checked against higher gate of 18
+        let response = MockAgeRangeResponse.sharing(
+            range: MockAgeRange(lowerBound: 13, upperBound: 15))
+        let state = AgeSignalsMapper.mapResponse(response, minimumAge: 18)
+        XCTAssertEqual(state, .belowMinimumAge(minimumAge: 18))
+    }
+
+    // ---- sharing: range spans the threshold → conservative grant ----
+
+    func test_sharing_range_spanning_threshold_returns_inRange() {
+        // lowerBound below the gate, upperBound above it → cannot confirm "too young" → grant
+        let response = MockAgeRangeResponse.sharing(
+            range: MockAgeRange(lowerBound: 10, upperBound: 20))
+        let state = AgeSignalsMapper.mapResponse(response, minimumAge: minimumAge)
         XCTAssertEqual(state, .inRange)
     }
 
-    func test_sharing_lowerBound_18_returns_inRange() {
-        let response = MockAgeRangeResponse.sharing(lowerBound: 18, upperBound: nil)
-        let state = mapMockResponse(response, minimumAge: 13)
-        XCTAssertEqual(state, .inRange)
-    }
+    // ---- sharing: nil lowerBound with nil upperBound ----
 
-    func test_sharing_lowerBound_set_returns_inRange_regardless_of_exact_value() {
-        // Any non-nil lowerBound means the person is at or above the gate
-        for lowerBound in [13, 15, 16, 17, 18, 21, 100] {
-            let response = MockAgeRangeResponse.sharing(lowerBound: lowerBound, upperBound: nil)
-            let state = mapMockResponse(response, minimumAge: 13)
-            XCTAssertEqual(state, .inRange, "Expected inRange for lowerBound=\(lowerBound)")
-        }
+    func test_sharing_both_nil_returns_belowMinimumAge() {
+        // Both bounds nil: no age data at all → defensive: block
+        let response = MockAgeRangeResponse.sharing(
+            range: MockAgeRange(lowerBound: nil, upperBound: nil))
+        let state = AgeSignalsMapper.mapResponse(response, minimumAge: minimumAge)
+        XCTAssertEqual(state, .belowMinimumAge(minimumAge: 13))
     }
 
     // ---- Errors ----
 
     func test_notAvailable_error_returns_notApplicable() {
-        let state = mapMockError(.notAvailable)
+        let state = AgeSignalsMapper.mapError(.notAvailable)
         XCTAssertEqual(state, .notApplicable)
     }
 
     func test_invalidRequest_error_returns_error_state() {
-        let state = mapMockError(.invalidRequest)
-        XCTAssertEqual(state, .error("invalidRequest"))
+        let state = AgeSignalsMapper.mapError(.invalidRequest)
+        XCTAssertEqual(state, .error(
+            code: "invalidRequest",
+            message: "Invalid age gate configuration — ensure minimumAge ≥ 2"))
     }
 
-    // ---- Age gate boundary tests ----
+    // ---- toJSObject serialization ----
 
-    func test_threshold_13_below_age_returns_belowMinimumAge() {
-        // Child under 13: lowerBound is nil (below lowest gate of 13)
-        let response = MockAgeRangeResponse.sharing(lowerBound: nil, upperBound: nil)
-        let state = mapMockResponse(response, minimumAge: 13)
-        XCTAssertEqual(state, .belowMinimumAge(13))
+    func test_toJSObject_inRange() {
+        let obj = AgeSignalsState.inRange.toJSObject()
+        XCTAssertEqual(obj["state"] as? String, "inRange")
+        XCTAssertNil(obj["minimumAge"])
+        XCTAssertNil(obj["errorCode"])
     }
 
-    func test_threshold_13_at_age_returns_inRange() {
-        // Person is exactly 13: lowerBound = 13
-        let response = MockAgeRangeResponse.sharing(lowerBound: 13, upperBound: nil)
-        let state = mapMockResponse(response, minimumAge: 13)
-        XCTAssertEqual(state, .inRange)
+    func test_toJSObject_notApplicable() {
+        let obj = AgeSignalsState.notApplicable.toJSObject()
+        XCTAssertEqual(obj["state"] as? String, "notApplicable")
     }
 
-    func test_multiple_age_gates_below_lowest_returns_belowMinimumAge() {
-        // App uses gates [13, 16, 18] and person is under 13
-        // lowerBound will be nil from Apple's API
-        let response = MockAgeRangeResponse.sharing(lowerBound: nil, upperBound: nil)
-        let state = mapMockResponse(response, minimumAge: 13)
-        XCTAssertEqual(state, .belowMinimumAge(13))
+    func test_toJSObject_belowMinimumAge() {
+        let obj = AgeSignalsState.belowMinimumAge(minimumAge: 13).toJSObject()
+        XCTAssertEqual(obj["state"] as? String, "belowMinimumAge")
+        XCTAssertEqual(obj["minimumAge"] as? Int, 13)
+    }
+
+    func test_toJSObject_error() {
+        let obj = AgeSignalsState.error(code: "networkError", message: "No connection").toJSObject()
+        XCTAssertEqual(obj["state"] as? String, "error")
+        XCTAssertEqual(obj["errorCode"] as? String, "networkError")
+        XCTAssertEqual(obj["errorMessage"] as? String, "No connection")
     }
 }

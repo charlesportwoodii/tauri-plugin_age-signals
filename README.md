@@ -301,10 +301,14 @@ When all requirements are met, calling `ageSignal()` presents a **system-managed
 
 **Age interpretation:**
 
+The `DeclaredAgeRange` API returns a range with `lowerBound` and `upperBound` rather than an exact age. The plugin resolves this against `minimumAge` using the same conservative logic as Android:
+
 | Scenario | Result |
 |---|---|
-| User consents and lower bound ≥ `minimumAge` | `"meetsAgeGate"` |
-| User consents and lower bound is nil (below range) | `"belowAgeGate"` |
+| Range is entirely at or above `minimumAge` (lower bound ≥ `minimumAge`) | `"meetsAgeGate"` |
+| Range spans the `minimumAge` boundary | `"meetsAgeGate"` (conservative — no false negatives) |
+| Range is entirely below `minimumAge` (upper bound < `minimumAge`) | `"belowAgeGate"` |
+| Lower bound is nil (below the lowest age gate) | `"belowAgeGate"` |
 | User declines to share | `"notApplicable"` |
 | Device not eligible (non-regulated region, parental controls, etc.) | `"notApplicable"` |
 | Framework not available (iOS < 26) | `"notApplicable"` |
@@ -319,7 +323,7 @@ Desktop platforms (macOS, Windows, Linux) are not subject to mobile age signal r
 
 ### Rust Unit Tests
 
-The plugin includes unit tests for the core mapping logic (14 tests total covering all result paths). Run them with:
+The plugin includes unit tests for the core mapping logic (11 tests total covering all result paths). Run them with:
 
 ```bash
 # From the plugin root
@@ -334,81 +338,33 @@ cargo test desktop::tests
 ```
 
 Tests are in:
-- `src/mapping.rs` — 11 tests covering all Android/iOS result state → Rust type mappings
-- `src/desktop.rs` — 3 tests verifying desktop always returns `None`
+- `src/mapping.rs` — 10 tests covering all Android/iOS result state → Rust type mappings
+- `src/desktop.rs` — 1 test verifying desktop always returns `NotApplicable`
 
-### Android Instrumented Tests
+### Android Unit Tests
 
-The Android tests run on a connected device or emulator and use `FakeAgeSignalsManager` from the Play Age Signals SDK to simulate API responses without needing a real regulated-region device.
-
-**Prerequisites:**
-- Java 17+
-- Android SDK with build tools for API 34+
-- Android NDK r27 (`27.0.11902837`)
-- A connected Android device **or** an x86_64 emulator (API 34+, Google APIs image recommended)
-- Rust Android targets installed
-
-**Setup:**
-
-```bash
-# Install Rust Android targets
-rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
-
-# Install frontend dependencies
-cd examples/tauri-app
-yarn install
-
-# Initialize the Tauri Android project (generates gen/android/ and .tauri/)
-yarn tauri android init
-```
+The Android tests are local JVM unit tests that use `AgeSignalsResult.builder()` and `AgeSignalsException` from the Play Age Signals SDK to exercise all response and error paths without a device or emulator. The tests cover the `AgeSignalsMapper` logic for all documented `AgeSignalsVerificationStatus` values and error codes.
 
 **Run the tests:**
 
 ```bash
-# From examples/tauri-app — start a connected device or emulator first, then:
-cd gen/android
-./gradlew connectedAndroidTest
-
-# To run only the plugin module's tests:
-./gradlew connectedAndroidTest --tests "com.charlesportwoodii.tauri.plugin.agesignals.*"
+# From the android/ directory
+cd android
+./gradlew test
 ```
 
-**View results:** HTML reports are written to `gen/android/build/reports/androidTests/connected/`.
+**View results:** HTML reports are written to `android/build/reports/tests/`.
 
 ### iOS Tests
 
-The iOS Swift tests are part of the Tauri-generated Xcode project and require:
+The iOS Swift tests are a standalone Swift Package in `ios/Tests/` that exercises the mapping logic using mock types — no Tauri, UIKit, or `DeclaredAgeRange` dependency is required. Tests cover all response paths (`sharing`, `declinedSharing`), bounds comparison logic, error mapping, and `toJSObject()` serialization.
 
-- macOS with Xcode that includes the iOS 26 SDK (Xcode 16+ beta or later)
-- The `DeclaredAgeRange` system framework (bundled with iOS 26 SDK)
-- Rust iOS targets installed
-
-**Setup:**
+**Run the tests:**
 
 ```bash
-# Install Rust iOS targets
-rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
-
-# Install frontend dependencies
-cd examples/tauri-app
-yarn install
-
-# Initialize the Tauri iOS project (generates gen/apple/ and .tauri/)
-yarn tauri ios init
-```
-
-**Run the tests from Xcode:**
-
-```bash
-# Open the generated Xcode project
-yarn tauri ios open
-
-# Then in Xcode: Product → Test (⌘U)
-# Or run a specific scheme/destination from the command line:
-xcodebuild test \
-  -project gen/apple/tauri-app.xcodeproj \
-  -scheme tauri-app \
-  -destination "platform=iOS Simulator,name=iPhone 16,OS=26.0"
+# From the ios/Tests/ directory
+cd ios/Tests
+swift test
 ```
 
 **Note:** The `DeclaredAgeRange` framework link in `ios/Package.swift` requires the iOS 26 SDK at build time. On Xcode versions without iOS 26 SDK, the Swift package will fail to link. The Rust compilation itself (without Swift) targets iOS without this restriction and works on any version.
