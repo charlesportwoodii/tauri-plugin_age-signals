@@ -187,43 +187,52 @@ try {
       break
   }
 } catch (error: unknown) {
-  const e = error as AgeSignalsError
-
-  switch (e.type) {
-    case 'NetworkError':
-      // Android: transient network failure — safe to retry
-      console.warn('Network error:', e.data)
-      break
-
-    case 'PlayStoreNotFound':
-      // Android: Play Store is not installed
-      // Treat the same as null (cannot verify)
-      applyDefaultRestrictions()
-      break
-
-    case 'AppNotOwned':
-      // Android: app was not installed through the Play Store
-      // Side-loaded apps cannot use Age Signals
-      applyDefaultRestrictions()
-      break
-
-    case 'ApiNotAvailable':
-      // Android: Play Services or Age Signals API is outdated
-      console.warn('API unavailable:', e.data)
-      applyDefaultRestrictions()
-      break
-
-    case 'InvalidRequest':
-      // iOS: misconfigured entitlement or Info.plist — check setup steps above
-      console.error('Invalid age range request:', e.data)
-      break
-
-    case 'InternalError':
-      console.error('Internal error:', e.data)
-      break
-  }
+  // Only actionable errors are thrown — environmental conditions
+  // (Play Store missing, API outdated, etc.) resolve to 'notApplicable'.
+  console.error('Age signal error:', error)
 }
 ```
+
+### Rust
+
+The plugin exposes an `AgeSignalsExt` trait on `AppHandle` for use from Rust backend code (e.g., in Tauri commands or setup hooks):
+
+```rust
+use tauri_plugin_age_signals::{AgeSignal, AgeSignalsExt};
+
+#[tauri::command]
+async fn gate_content(app: tauri::AppHandle) -> Result<bool, String> {
+    match app.age_signals().age_signal(13).await {
+        Ok(AgeSignal::MeetsAgeGate) => {
+            // Old enough, or a guardian-approved supervised account
+            Ok(true)
+        }
+        Ok(AgeSignal::BelowAgeGate) => {
+            // Confirmed under 13, or supervised approval pending/denied
+            Ok(false)
+        }
+        Ok(AgeSignal::NotApplicable) => {
+            // Desktop, non-regulated region, user declined (iOS),
+            // sideloaded (Android), or platform has no signal.
+            // Apply your own default policy.
+            Ok(false)
+        }
+        Err(e) => {
+            // All errors implement Display via thiserror —
+            // no need for platform-specific handling.
+            Err(e.to_string())
+        }
+    }
+}
+```
+
+The public API surface is:
+
+| Type | Description |
+|---|---|
+| `AgeSignalsExt` | Extension trait — adds `.age_signals()` to `AppHandle`, `App`, and `Window` |
+| `AgeSignal` | Result enum: `MeetsAgeGate`, `BelowAgeGate`, `NotApplicable` |
+| `Error` | Error enum: `NetworkError` (retryable), `InvalidRequest` (misconfiguration), `InternalError` |
 
 ### Return Values
 
@@ -235,20 +244,19 @@ try {
 | `"belowAgeGate"` | User is **not permitted**: confirmed below `minimumAge`, or a supervised account whose guardian approval is pending or denied |
 | `"notApplicable"` | Age **cannot be determined**: feature unavailable in region, platform doesn't support age signals, user declined to share (iOS), or app is sideloaded (Android) |
 
-Genuine failures (network, Play Store missing, etc.) are thrown — see [Error Reference](#error-reference) below.
+Genuine failures (network, misconfiguration) are thrown — see [Error Reference](#error-reference) below. Environmental conditions that prevent age verification (Play Store missing, API outdated, app sideloaded) are **not** errors — they resolve to `"notApplicable"`.
 
-> **Design guidance:** When the result is `"notApplicable"`, apply your **most restrictive** default. Errors represent the *absence* of an answer, not a "too young" verdict — only `"belowAgeGate"` confirms a user is under age.
+> **Design guidance:** When the result is `"notApplicable"`, apply your **most restrictive** default. Only `"belowAgeGate"` confirms a user is under age; `"notApplicable"` means the platform cannot determine age.
 
 ### Error Reference
 
-| Error type | When thrown | Platform |
+Only actionable failures are surfaced as errors. Environmental conditions (Play Store missing, API outdated, app sideloaded, etc.) resolve to `"notApplicable"` instead.
+
+| Error type | When thrown | Retryable |
 |---|---|---|
-| `ApiNotAvailable` | Play Services or the Age Signals API is too old to support the request. | Android |
-| `NetworkError` | Transient network failure while querying age signals. | Android |
-| `PlayStoreNotFound` | Google Play Store is not installed on the device. | Android |
-| `AppNotOwned` | The app was not installed through the Play Store (e.g., sideloaded via ADB). | Android |
-| `InvalidRequest` | Misconfigured entitlement or `minimumAge < 2`. Check [iOS setup](#3-ios--entitlement). | iOS |
-| `InternalError` | Unexpected native error. `data` contains the raw error message. | Both |
+| `NetworkError` | Transient network failure while querying age signals. | Yes |
+| `InvalidRequest` | Misconfigured entitlement or `minimumAge < 2`. Check [iOS setup](#3-ios--entitlement). | No (fix configuration) |
+| `InternalError` | Unexpected native error. `data` contains the raw error message. | No |
 
 ---
 

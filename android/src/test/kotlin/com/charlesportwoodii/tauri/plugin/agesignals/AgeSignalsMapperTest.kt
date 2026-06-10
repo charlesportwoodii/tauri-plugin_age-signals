@@ -189,15 +189,29 @@ class AgeSignalsMapperTest {
         assertEquals(AgeSignalsState.InRange, AgeSignalsMapper.mapResult(result, minimumAge))
     }
 
-    // ---- mapException: NETWORK_ERROR (Google's documented exception scenario) ----
+    // ---- mapException: genuine errors (actionable by the caller) ----
 
     @Test
     fun network_error_returns_Error_networkError() {
+        // -3 = NETWORK_ERROR: transient, retryable
         val state = AgeSignalsMapper.mapException(AgeSignalsException(-3)) as AgeSignalsState.Error
         assertEquals("networkError", state.code)
     }
 
-    // ---- mapException: full documented error-code coverage ----
+    @Test
+    fun internal_error_returns_Error_internalError() {
+        // -100 = INTERNAL_ERROR: unexpected Play Store error
+        val state = AgeSignalsMapper.mapException(AgeSignalsException(-100)) as AgeSignalsState.Error
+        assertEquals("internalError", state.code)
+    }
+
+    @Test
+    fun non_AgeSignalsException_returns_internalError() {
+        val state = AgeSignalsMapper.mapException(RuntimeException("boom")) as AgeSignalsState.Error
+        assertEquals("internalError", state.code)
+    }
+
+    // ---- mapException: environmental conditions → NotApplicable (not actionable) ----
 
     @Test
     fun error_minus_1_api_not_available_returns_NotApplicable() {
@@ -205,67 +219,47 @@ class AgeSignalsMapperTest {
     }
 
     @Test
-    fun error_minus_2_play_store_not_found_returns_Error() {
-        val state = AgeSignalsMapper.mapException(AgeSignalsException(-2)) as AgeSignalsState.Error
-        assertEquals("playStoreNotFound", state.code)
+    fun error_minus_2_play_store_not_found_returns_NotApplicable() {
+        assertEquals(AgeSignalsState.NotApplicable, AgeSignalsMapper.mapException(AgeSignalsException(-2)))
     }
 
     @Test
-    fun error_minus_4_play_services_not_found_returns_Error() {
-        val state = AgeSignalsMapper.mapException(AgeSignalsException(-4)) as AgeSignalsState.Error
-        assertEquals("apiNotAvailable", state.code)
+    fun error_minus_4_play_services_not_found_returns_NotApplicable() {
+        assertEquals(AgeSignalsState.NotApplicable, AgeSignalsMapper.mapException(AgeSignalsException(-4)))
     }
 
     @Test
-    fun error_minus_5_cannot_bind_returns_Error() {
-        val state = AgeSignalsMapper.mapException(AgeSignalsException(-5)) as AgeSignalsState.Error
-        assertEquals("apiNotAvailable", state.code)
+    fun error_minus_5_cannot_bind_returns_NotApplicable() {
+        assertEquals(AgeSignalsState.NotApplicable, AgeSignalsMapper.mapException(AgeSignalsException(-5)))
     }
 
     @Test
-    fun error_minus_6_play_store_outdated_returns_Error() {
-        val state = AgeSignalsMapper.mapException(AgeSignalsException(-6)) as AgeSignalsState.Error
-        assertEquals("apiNotAvailable", state.code)
+    fun error_minus_6_play_store_outdated_returns_NotApplicable() {
+        assertEquals(AgeSignalsState.NotApplicable, AgeSignalsMapper.mapException(AgeSignalsException(-6)))
     }
 
     @Test
-    fun error_minus_7_play_services_outdated_returns_Error() {
-        val state = AgeSignalsMapper.mapException(AgeSignalsException(-7)) as AgeSignalsState.Error
-        assertEquals("apiNotAvailable", state.code)
+    fun error_minus_7_play_services_outdated_returns_NotApplicable() {
+        assertEquals(AgeSignalsState.NotApplicable, AgeSignalsMapper.mapException(AgeSignalsException(-7)))
     }
 
     @Test
-    fun error_minus_8_client_transient_returns_Error() {
-        val state = AgeSignalsMapper.mapException(AgeSignalsException(-8)) as AgeSignalsState.Error
-        assertEquals("apiNotAvailable", state.code)
+    fun error_minus_8_client_transient_returns_NotApplicable() {
+        assertEquals(AgeSignalsState.NotApplicable, AgeSignalsMapper.mapException(AgeSignalsException(-8)))
     }
 
     @Test
-    fun error_minus_9_app_not_owned_returns_Error() {
-        val state = AgeSignalsMapper.mapException(AgeSignalsException(-9)) as AgeSignalsState.Error
-        assertEquals("appNotOwned", state.code)
+    fun error_minus_9_app_not_owned_returns_NotApplicable() {
+        assertEquals(AgeSignalsState.NotApplicable, AgeSignalsMapper.mapException(AgeSignalsException(-9)))
     }
 
     @Test
-    fun error_minus_10_sdk_outdated_returns_Error() {
-        val state = AgeSignalsMapper.mapException(AgeSignalsException(-10)) as AgeSignalsState.Error
-        assertEquals("apiNotAvailable", state.code)
-    }
-
-    @Test
-    fun error_minus_100_internal_returns_Error() {
-        val state = AgeSignalsMapper.mapException(AgeSignalsException(-100)) as AgeSignalsState.Error
-        assertEquals("internalError", state.code)
+    fun error_minus_10_sdk_outdated_returns_NotApplicable() {
+        assertEquals(AgeSignalsState.NotApplicable, AgeSignalsMapper.mapException(AgeSignalsException(-10)))
     }
 
     @Test
     fun unrecognised_AgeSignalsException_code_returns_NotApplicable() {
         assertEquals(AgeSignalsState.NotApplicable, AgeSignalsMapper.mapException(AgeSignalsException(-42)))
-    }
-
-    @Test
-    fun non_AgeSignalsException_returns_internalError() {
-        val state = AgeSignalsMapper.mapException(RuntimeException("boom")) as AgeSignalsState.Error
-        assertEquals("internalError", state.code)
     }
 }

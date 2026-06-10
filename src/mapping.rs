@@ -21,10 +21,8 @@ pub(crate) fn map_mobile_result(result: MobileAgeRangeResult) -> crate::Result<A
             let message = result.error_message.unwrap_or_default();
             match result.error_code.as_deref() {
                 Some("networkError") => Err(Error::NetworkError(message)),
-                Some("playStoreNotFound") => Err(Error::PlayStoreNotFound),
-                Some("appNotOwned") => Err(Error::AppNotOwned),
-                Some("apiNotAvailable") => Err(Error::ApiNotAvailable(message)),
                 Some("invalidRequest") => Err(Error::InvalidRequest(message)),
+                Some("internalError") => Err(Error::InternalError(message)),
                 _ => Err(Error::InternalError(message)),
             }
         }
@@ -84,43 +82,6 @@ mod tests {
     }
 
     #[test]
-    fn error_app_not_owned_maps_correctly() {
-        let result = make_result(MobileAgeRangeState::Error, None, Some("appNotOwned"), None);
-        assert!(matches!(
-            map_mobile_result(result).unwrap_err(),
-            Error::AppNotOwned
-        ));
-    }
-
-    #[test]
-    fn error_play_store_not_found_maps_correctly() {
-        let result = make_result(
-            MobileAgeRangeState::Error,
-            None,
-            Some("playStoreNotFound"),
-            None,
-        );
-        assert!(matches!(
-            map_mobile_result(result).unwrap_err(),
-            Error::PlayStoreNotFound
-        ));
-    }
-
-    #[test]
-    fn error_api_not_available_maps_correctly() {
-        let result = make_result(
-            MobileAgeRangeState::Error,
-            None,
-            Some("apiNotAvailable"),
-            Some("API unavailable"),
-        );
-        assert!(matches!(
-            map_mobile_result(result).unwrap_err(),
-            Error::ApiNotAvailable(_)
-        ));
-    }
-
-    #[test]
     fn error_invalid_request_maps_correctly() {
         let result = make_result(
             MobileAgeRangeState::Error,
@@ -131,6 +92,20 @@ mod tests {
         assert!(matches!(
             map_mobile_result(result).unwrap_err(),
             Error::InvalidRequest(_)
+        ));
+    }
+
+    #[test]
+    fn error_internal_maps_correctly() {
+        let result = make_result(
+            MobileAgeRangeState::Error,
+            None,
+            Some("internalError"),
+            Some("Something broke"),
+        );
+        assert!(matches!(
+            map_mobile_result(result).unwrap_err(),
+            Error::InternalError(_)
         ));
     }
 

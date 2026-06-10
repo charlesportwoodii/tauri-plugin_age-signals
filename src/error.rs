@@ -4,17 +4,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Age signals API not available: {0}")]
-    ApiNotAvailable(String),
-
     #[error("Network error: {0}")]
     NetworkError(String),
-
-    #[error("Play Store not found")]
-    PlayStoreNotFound,
-
-    #[error("App not installed via Play Store")]
-    AppNotOwned,
 
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
