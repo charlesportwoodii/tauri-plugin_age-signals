@@ -1,5 +1,5 @@
 [default]
-description = "Default permissions for the age-signals plugin — allows checking age range."
+description = "Default permissions for the age-signals plugin — allows checking the age signal."
 permissions = [
-  "allow-check-age-range"
+  "allow-age-signal"
 ]

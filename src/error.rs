@@ -4,9 +4,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("User is below minimum age {minimum_age}")]
-    BelowMinimumAge { minimum_age: u8 },
-
     #[error("Age signals API not available: {0}")]
     ApiNotAvailable(String),
 

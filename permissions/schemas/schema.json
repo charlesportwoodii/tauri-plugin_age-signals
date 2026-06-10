@@ -295,22 +295,22 @@
       "type": "string",
       "oneOf": [
         {
-          "description": "Enables the check_age_range command without any pre-configured scope.",
+          "description": "Enables the age_signal command without any pre-configured scope.",
           "type": "string",
-          "const": "allow-check-age-range",
-          "markdownDescription": "Enables the check_age_range command without any pre-configured scope."
+          "const": "allow-age-signal",
+          "markdownDescription": "Enables the age_signal command without any pre-configured scope."
         },
         {
-          "description": "Denies the check_age_range command without any pre-configured scope.",
+          "description": "Denies the age_signal command without any pre-configured scope.",
           "type": "string",
-          "const": "deny-check-age-range",
-          "markdownDescription": "Denies the check_age_range command without any pre-configured scope."
+          "const": "deny-age-signal",
+          "markdownDescription": "Denies the age_signal command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the age-signals plugin — allows checking age range.\n#### This default permission set includes:\n\n- `allow-check-age-range`",
+          "description": "Default permissions for the age-signals plugin — allows checking the age signal.\n#### This default permission set includes:\n\n- `allow-age-signal`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the age-signals plugin — allows checking age range.\n#### This default permission set includes:\n\n- `allow-check-age-range`"
+          "markdownDescription": "Default permissions for the age-signals plugin — allows checking the age signal.\n#### This default permission set includes:\n\n- `allow-age-signal`"
         }
       ]
     }

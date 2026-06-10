@@ -1,4 +1,4 @@
-const COMMANDS: &[&str] = &["check_age_range"];
+const COMMANDS: &[&str] = &["age_signal"];
 
 fn main() {
     tauri_plugin::Builder::new(COMMANDS)

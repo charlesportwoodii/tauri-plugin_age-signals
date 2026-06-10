@@ -1,10 +1,10 @@
 ## Default Permission
 
-Default permissions for the age-signals plugin — allows checking age range.
+Default permissions for the age-signals plugin — allows checking the age signal.
 
 #### This default permission set includes the following:
 
-- `allow-check-age-range`
+- `allow-age-signal`
 
 ## Permission Table
 
@@ -18,12 +18,12 @@ Default permissions for the age-signals plugin — allows checking age range.
 <tr>
 <td>
 
-`age-signals:allow-check-age-range`
+`age-signals:allow-age-signal`
 
 </td>
 <td>
 
-Enables the check_age_range command without any pre-configured scope.
+Enables the age_signal command without any pre-configured scope.
 
 </td>
 </tr>
@@ -31,12 +31,12 @@ Enables the check_age_range command without any pre-configured scope.
 <tr>
 <td>
 
-`age-signals:deny-check-age-range`
+`age-signals:deny-age-signal`
 
 </td>
 <td>
 
-Denies the check_age_range command without any pre-configured scope.
+Denies the age_signal command without any pre-configured scope.
 
 </td>
 </tr>

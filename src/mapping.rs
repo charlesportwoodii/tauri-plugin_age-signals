@@ -1,23 +1,22 @@
 use crate::{
     error::Error,
-    models::{MobileAgeRangeResult, MobileAgeRangeState},
+    models::{AgeSignal, MobileAgeRangeResult, MobileAgeRangeState},
 };
 
-/// Maps the bridge DTO returned by native Android/iOS code to the unified Rust Result type.
+/// Maps the bridge DTO returned by native Android/iOS code to the public [`AgeSignal`] result.
 #[allow(dead_code)] // Used from mobile.rs (cfg(mobile)); always compiled for tests
 ///
 /// This function is always compiled (not gated behind #[cfg(mobile)]) so it can be unit tested
 /// on any host platform including desktop.
-pub(crate) fn map_mobile_result(
-    result: MobileAgeRangeResult,
-    minimum_age: u8,
-) -> crate::Result<Option<bool>> {
+///
+/// The native layer has already applied the platform-specific policy (age range comparison,
+/// supervised-account rules, regulated-region detection). This function only translates the
+/// resolved state into the public type, routing genuine failures to [`Error`].
+pub(crate) fn map_mobile_result(result: MobileAgeRangeResult) -> crate::Result<AgeSignal> {
     match result.state {
-        MobileAgeRangeState::InRange => Ok(Some(true)),
-        MobileAgeRangeState::NotApplicable => Ok(None),
-        MobileAgeRangeState::BelowMinimumAge => Err(Error::BelowMinimumAge {
-            minimum_age: result.minimum_age.unwrap_or(minimum_age),
-        }),
+        MobileAgeRangeState::InRange => Ok(AgeSignal::MeetsAgeGate),
+        MobileAgeRangeState::BelowMinimumAge => Ok(AgeSignal::BelowAgeGate),
+        MobileAgeRangeState::NotApplicable => Ok(AgeSignal::NotApplicable),
         MobileAgeRangeState::Error => {
             let message = result.error_message.unwrap_or_default();
             match result.error_code.as_deref() {
@@ -52,33 +51,22 @@ mod tests {
     }
 
     #[test]
-    fn in_range_returns_some_true() {
+    fn in_range_maps_to_meets_age_gate() {
         let result = make_result(MobileAgeRangeState::InRange, None, None, None);
-        assert_eq!(map_mobile_result(result, 13).unwrap(), Some(true));
+        assert_eq!(map_mobile_result(result).unwrap(), AgeSignal::MeetsAgeGate);
     }
 
     #[test]
-    fn not_applicable_returns_none() {
-        let result = make_result(MobileAgeRangeState::NotApplicable, None, None, None);
-        assert_eq!(map_mobile_result(result, 13).unwrap(), None);
-    }
-
-    #[test]
-    fn below_minimum_age_returns_error_with_provided_age() {
+    fn below_minimum_age_maps_to_below_age_gate() {
+        // "Too young" is a legitimate outcome, not an error.
         let result = make_result(MobileAgeRangeState::BelowMinimumAge, Some(13), None, None);
-        match map_mobile_result(result, 13).unwrap_err() {
-            Error::BelowMinimumAge { minimum_age } => assert_eq!(minimum_age, 13),
-            e => panic!("expected BelowMinimumAge, got {e:?}"),
-        }
+        assert_eq!(map_mobile_result(result).unwrap(), AgeSignal::BelowAgeGate);
     }
 
     #[test]
-    fn below_minimum_age_falls_back_to_request_age() {
-        let result = make_result(MobileAgeRangeState::BelowMinimumAge, None, None, None);
-        match map_mobile_result(result, 18).unwrap_err() {
-            Error::BelowMinimumAge { minimum_age } => assert_eq!(minimum_age, 18),
-            e => panic!("expected BelowMinimumAge, got {e:?}"),
-        }
+    fn not_applicable_maps_to_not_applicable() {
+        let result = make_result(MobileAgeRangeState::NotApplicable, None, None, None);
+        assert_eq!(map_mobile_result(result).unwrap(), AgeSignal::NotApplicable);
     }
 
     #[test]
@@ -90,7 +78,7 @@ mod tests {
             Some("No connection"),
         );
         assert!(matches!(
-            map_mobile_result(result, 13).unwrap_err(),
+            map_mobile_result(result).unwrap_err(),
             Error::NetworkError(_)
         ));
     }
@@ -99,7 +87,7 @@ mod tests {
     fn error_app_not_owned_maps_correctly() {
         let result = make_result(MobileAgeRangeState::Error, None, Some("appNotOwned"), None);
         assert!(matches!(
-            map_mobile_result(result, 13).unwrap_err(),
+            map_mobile_result(result).unwrap_err(),
             Error::AppNotOwned
         ));
     }
@@ -113,7 +101,7 @@ mod tests {
             None,
         );
         assert!(matches!(
-            map_mobile_result(result, 13).unwrap_err(),
+            map_mobile_result(result).unwrap_err(),
             Error::PlayStoreNotFound
         ));
     }
@@ -127,7 +115,7 @@ mod tests {
             Some("API unavailable"),
         );
         assert!(matches!(
-            map_mobile_result(result, 13).unwrap_err(),
+            map_mobile_result(result).unwrap_err(),
             Error::ApiNotAvailable(_)
         ));
     }
@@ -141,7 +129,7 @@ mod tests {
             Some("Bad age gates"),
         );
         assert!(matches!(
-            map_mobile_result(result, 13).unwrap_err(),
+            map_mobile_result(result).unwrap_err(),
             Error::InvalidRequest(_)
         ));
     }
@@ -155,7 +143,7 @@ mod tests {
             Some("mystery"),
         );
         assert!(matches!(
-            map_mobile_result(result, 13).unwrap_err(),
+            map_mobile_result(result).unwrap_err(),
             Error::InternalError(_)
         ));
     }
@@ -164,7 +152,7 @@ mod tests {
     fn error_no_code_maps_to_internal() {
         let result = make_result(MobileAgeRangeState::Error, None, None, None);
         assert!(matches!(
-            map_mobile_result(result, 13).unwrap_err(),
+            map_mobile_result(result).unwrap_err(),
             Error::InternalError(_)
         ));
     }

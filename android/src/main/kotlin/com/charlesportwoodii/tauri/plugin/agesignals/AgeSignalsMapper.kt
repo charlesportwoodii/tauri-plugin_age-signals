@@ -17,32 +17,42 @@ internal sealed class AgeSignalsState {
 internal object AgeSignalsMapper {
 
     fun mapResult(result: AgeSignalsResult, minimumAge: Int): AgeSignalsState {
-        val status = result.userStatus()
+        when (result.userStatus()) {
+            // null  = not in a regulated region (the law does not apply here).
+            // UNKNOWN = regulated region, but Play has no age data for this user.
+            // Neither yields a usable signal → the caller applies its own default policy.
+            null, AgeSignalsVerificationStatus.UNKNOWN ->
+                return AgeSignalsState.NotApplicable
+
+            // Active supervised account managed/approved by a guardian. Parental consent
+            // permits use regardless of the child's own age.
+            AgeSignalsVerificationStatus.SUPERVISED ->
+                return AgeSignalsState.InRange
+
+            // A guardian approval is required and is not currently granted (awaiting a
+            // decision, or explicitly denied) → block until resolved.
+            AgeSignalsVerificationStatus.SUPERVISED_APPROVAL_PENDING,
+            AgeSignalsVerificationStatus.SUPERVISED_APPROVAL_DENIED ->
+                return AgeSignalsState.BelowMinimumAge(minimumAge)
+
+            // VERIFIED / DECLARED carry a real age range → decide on the bounds below.
+            else -> {}
+        }
+
         val ageLower = result.ageLower()
         val ageUpper = result.ageUpper()
 
-        // null = not in applicable region; UNKNOWN = in applicable region but age unknown
-        // Both cases cannot confirm an age → not applicable
-        if (status == null || status == AgeSignalsVerificationStatus.UNKNOWN) {
-            return AgeSignalsState.NotApplicable
-        }
-
-        // Supervised account that was explicitly denied by parent
-        if (status == AgeSignalsVerificationStatus.SUPERVISED_APPROVAL_DENIED) {
-            return AgeSignalsState.BelowMinimumAge(minimumAge)
-        }
-
-        // User is confirmed at or above minimum age
+        // Confirmed at or above the minimum age.
         if (ageLower != null && ageLower >= minimumAge) {
             return AgeSignalsState.InRange
         }
 
-        // User is confirmed below minimum age (upper bound known and below threshold)
+        // Confirmed below the minimum age (upper bound known and below threshold).
         if (ageUpper != null && ageUpper < minimumAge) {
             return AgeSignalsState.BelowMinimumAge(minimumAge)
         }
 
-        // Range spans the threshold — conservative: grant access
+        // Range spans the threshold — conservative: grant access.
         return AgeSignalsState.InRange
     }
 

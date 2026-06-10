@@ -8,23 +8,33 @@ import com.google.android.play.agesignals.AgeSignalsResult
 import com.google.android.play.agesignals.model.AgeSignalsVerificationStatus
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.util.Date
 
 /**
  * Local JVM unit tests for AgeSignalsMapper.
  *
- * Tests all AgeSignalsVerificationStatus variants and all documented AgeSignalsException
- * error codes. No device or emulator required.
+ * The fixtures mirror the scenarios Google documents for FakeAgeSignalsManager:
+ * https://developer.android.com/google/play/age-signals/test-age-signals-api
+ * — a VERIFIED adult, a SUPERVISED minor, a DECLARED self-reported range, supervised
+ * approval PENDING (with and without a prior approval date) and DENIED, UNKNOWN, a null
+ * status, and the NETWORK_ERROR exception — plus the full set of documented error codes.
  *
- * Run with: ./gradlew test  (from android/)
+ * No device or emulator required. Run with: ./gradlew test  (from android/)
  */
 class AgeSignalsMapperTest {
 
     private val minimumAge = 13
 
-    // ---- mapResult: VERIFIED ----
+    private fun approvalDate(): Date =
+        Date.from(LocalDate.of(2025, 2, 1).atStartOfDay(ZoneOffset.UTC).toInstant())
+
+    // ---- VERIFIED: adult, decided on the reported age range ----
 
     @Test
-    fun verified_above_minimum_age_returns_InRange() {
+    fun verified_adult_18_returns_InRange() {
+        // Google fixture: VERIFIED, ageLower = 18.
         val result = AgeSignalsResult.builder()
             .setUserStatus(AgeSignalsVerificationStatus.VERIFIED)
             .setAgeLower(18)
@@ -52,65 +62,107 @@ class AgeSignalsMapperTest {
         assertEquals(AgeSignalsState.BelowMinimumAge(minimumAge), AgeSignalsMapper.mapResult(result, minimumAge))
     }
 
-    // ---- mapResult: DECLARED ----
+    // ---- DECLARED: self-reported, decided on the reported age range ----
 
     @Test
-    fun declared_above_minimum_age_returns_InRange() {
+    fun declared_custom_range_13_to_15_returns_InRange() {
+        // Google fixture: DECLARED, ageLower = 13, ageUpper = 15, installId set.
         val result = AgeSignalsResult.builder()
             .setUserStatus(AgeSignalsVerificationStatus.DECLARED)
-            .setAgeLower(16)
-            .setAgeUpper(17)
+            .setAgeLower(13)
+            .setAgeUpper(15)
+            .setInstallId("fake_install_id")
             .build()
         assertEquals(AgeSignalsState.InRange, AgeSignalsMapper.mapResult(result, minimumAge))
     }
 
     @Test
     fun declared_below_minimum_age_returns_BelowMinimumAge() {
+        // Same DECLARED 13-15 range checked against a higher gate of 18.
         val result = AgeSignalsResult.builder()
             .setUserStatus(AgeSignalsVerificationStatus.DECLARED)
-            .setAgeLower(0)
-            .setAgeUpper(12)
+            .setAgeLower(13)
+            .setAgeUpper(15)
+            .setInstallId("fake_install_id")
             .build()
-        assertEquals(AgeSignalsState.BelowMinimumAge(minimumAge), AgeSignalsMapper.mapResult(result, minimumAge))
+        assertEquals(AgeSignalsState.BelowMinimumAge(18), AgeSignalsMapper.mapResult(result, 18))
     }
 
-    // ---- mapResult: SUPERVISED ----
+    // ---- SUPERVISED: guardian-managed → allowed regardless of the child's age ----
 
     @Test
-    fun supervised_above_minimum_age_returns_InRange() {
+    fun supervised_minor_13_to_17_returns_InRange() {
+        // Google fixture: SUPERVISED, ageLower = 13, ageUpper = 17, installId set.
         val result = AgeSignalsResult.builder()
             .setUserStatus(AgeSignalsVerificationStatus.SUPERVISED)
             .setAgeLower(13)
-            .setInstallId("test-install-id")
+            .setAgeUpper(17)
+            .setInstallId("fake_install_id")
             .build()
         assertEquals(AgeSignalsState.InRange, AgeSignalsMapper.mapResult(result, minimumAge))
     }
 
     @Test
-    fun supervised_approval_pending_above_minimum_age_returns_InRange() {
+    fun supervised_below_minimum_age_still_returns_InRange() {
+        // Parental consent overrides the age gate: a supervised account below the gate
+        // is still permitted. Gate of 18, supervised minor aged 13-17.
+        val result = AgeSignalsResult.builder()
+            .setUserStatus(AgeSignalsVerificationStatus.SUPERVISED)
+            .setAgeLower(13)
+            .setAgeUpper(17)
+            .setInstallId("fake_install_id")
+            .build()
+        assertEquals(AgeSignalsState.InRange, AgeSignalsMapper.mapResult(result, 18))
+    }
+
+    // ---- SUPERVISED_APPROVAL_PENDING: approval not yet granted → block ----
+
+    @Test
+    fun supervised_approval_pending_no_prior_approval_returns_BelowMinimumAge() {
+        // Google fixture: PENDING, ageLower = 13, ageUpper = 17, installId, no approval date.
         val result = AgeSignalsResult.builder()
             .setUserStatus(AgeSignalsVerificationStatus.SUPERVISED_APPROVAL_PENDING)
             .setAgeLower(13)
-            .setInstallId("test-install-id")
-            .build()
-        assertEquals(AgeSignalsState.InRange, AgeSignalsMapper.mapResult(result, minimumAge))
-    }
-
-    @Test
-    fun supervised_approval_denied_returns_BelowMinimumAge_regardless_of_age() {
-        val result = AgeSignalsResult.builder()
-            .setUserStatus(AgeSignalsVerificationStatus.SUPERVISED_APPROVAL_DENIED)
-            .setAgeLower(8)
-            .setAgeUpper(12)
-            .setInstallId("test-install-id")
+            .setAgeUpper(17)
+            .setInstallId("fake_install_id")
             .build()
         assertEquals(AgeSignalsState.BelowMinimumAge(minimumAge), AgeSignalsMapper.mapResult(result, minimumAge))
     }
 
-    // ---- mapResult: UNKNOWN and null ----
+    @Test
+    fun supervised_approval_pending_with_prior_approval_returns_BelowMinimumAge() {
+        // Google fixture: PENDING with a prior mostRecentApprovalDate. A new significant
+        // change is awaiting approval → still blocked until resolved.
+        val result = AgeSignalsResult.builder()
+            .setUserStatus(AgeSignalsVerificationStatus.SUPERVISED_APPROVAL_PENDING)
+            .setAgeLower(13)
+            .setAgeUpper(17)
+            .setMostRecentApprovalDate(approvalDate())
+            .setInstallId("fake_install_id")
+            .build()
+        assertEquals(AgeSignalsState.BelowMinimumAge(minimumAge), AgeSignalsMapper.mapResult(result, minimumAge))
+    }
+
+    // ---- SUPERVISED_APPROVAL_DENIED: explicitly denied → block regardless of age ----
+
+    @Test
+    fun supervised_approval_denied_returns_BelowMinimumAge() {
+        // Google fixture: DENIED, ageLower = 13, ageUpper = 17, installId, approval date.
+        val result = AgeSignalsResult.builder()
+            .setUserStatus(AgeSignalsVerificationStatus.SUPERVISED_APPROVAL_DENIED)
+            .setAgeLower(13)
+            .setAgeUpper(17)
+            .setMostRecentApprovalDate(approvalDate())
+            .setInstallId("fake_install_id")
+            .build()
+        assertEquals(AgeSignalsState.BelowMinimumAge(minimumAge), AgeSignalsMapper.mapResult(result, minimumAge))
+    }
+
+    // ---- UNKNOWN and null: no usable signal → NotApplicable ----
 
     @Test
     fun unknown_status_returns_NotApplicable() {
+        // Google fixture: UNKNOWN, no age range.
         val result = AgeSignalsResult.builder()
             .setUserStatus(AgeSignalsVerificationStatus.UNKNOWN)
             .build()
@@ -119,23 +171,33 @@ class AgeSignalsMapperTest {
 
     @Test
     fun null_status_returns_NotApplicable() {
+        // Google fixture: setUserStatus(null).
         val result = AgeSignalsResult.builder().build()
         assertEquals(AgeSignalsState.NotApplicable, AgeSignalsMapper.mapResult(result, minimumAge))
     }
 
-    // ---- mapResult: range spanning threshold ----
+    // ---- Age range spanning the threshold → conservative grant ----
 
     @Test
-    fun range_spanning_threshold_returns_InRange_conservatively() {
+    fun verified_range_spanning_threshold_returns_InRange_conservatively() {
+        // ageLower below the gate, ageUpper above it: cannot confirm "too young" → grant.
         val result = AgeSignalsResult.builder()
-            .setUserStatus(AgeSignalsVerificationStatus.SUPERVISED)
-            .setAgeLower(0)
-            .setInstallId("test-install-id")
+            .setUserStatus(AgeSignalsVerificationStatus.VERIFIED)
+            .setAgeLower(10)
+            .setAgeUpper(20)
             .build()
         assertEquals(AgeSignalsState.InRange, AgeSignalsMapper.mapResult(result, minimumAge))
     }
 
-    // ---- mapException: known error codes ----
+    // ---- mapException: NETWORK_ERROR (Google's documented exception scenario) ----
+
+    @Test
+    fun network_error_returns_Error_networkError() {
+        val state = AgeSignalsMapper.mapException(AgeSignalsException(-3)) as AgeSignalsState.Error
+        assertEquals("networkError", state.code)
+    }
+
+    // ---- mapException: full documented error-code coverage ----
 
     @Test
     fun error_minus_1_api_not_available_returns_NotApplicable() {
@@ -146,12 +208,6 @@ class AgeSignalsMapperTest {
     fun error_minus_2_play_store_not_found_returns_Error() {
         val state = AgeSignalsMapper.mapException(AgeSignalsException(-2)) as AgeSignalsState.Error
         assertEquals("playStoreNotFound", state.code)
-    }
-
-    @Test
-    fun error_minus_3_network_error_returns_Error() {
-        val state = AgeSignalsMapper.mapException(AgeSignalsException(-3)) as AgeSignalsState.Error
-        assertEquals("networkError", state.code)
     }
 
     @Test

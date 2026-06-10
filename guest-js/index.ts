@@ -1,12 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
 
 /**
- * Error returned when the user is confirmed below the minimum age.
+ * Outcome of an age signal check.
+ *
+ * - `meetsAgeGate`  — confirmed at or above `minimumAge`, or a supervised account
+ *                     approved/managed by a guardian.
+ * - `belowAgeGate`  — confirmed under `minimumAge`, or a supervised account whose
+ *                     guardian approval is pending or denied.
+ * - `notApplicable` — no usable signal (unregulated region, unsupported platform,
+ *                     user declined, or age could not be determined). Apply your own default.
  */
-export interface BelowMinimumAgeError {
-  type: "BelowMinimumAge";
-  data: { minimum_age: number };
-}
+export type AgeSignal = "meetsAgeGate" | "belowAgeGate" | "notApplicable";
 
 /**
  * Error returned when the Age Signals API is not available (e.g., Play Store outdated).
@@ -55,7 +59,6 @@ export interface InternalError {
 }
 
 export type AgeSignalsError =
-  | BelowMinimumAgeError
   | ApiNotAvailableError
   | NetworkError
   | PlayStoreNotFoundError
@@ -64,24 +67,25 @@ export type AgeSignalsError =
   | InternalError;
 
 /**
- * Check whether the current user meets the specified minimum age requirement.
+ * Determine whether the current user is permitted to use the app, given a minimum age.
+ *
+ * "Permitted" means either old enough, or a supervised account approved by a guardian.
  *
  * Platform behavior:
  * - **Android (API 23+)**: Queries the Play Age Signals SDK transparently (no UI).
  *   Only available in regulated regions (Brazil from March 2026, Utah from May 2026, etc.)
  * - **iOS 26+**: Presents a native system sheet asking the user to share their age range.
  *   Requires `com.apple.developer.declared-age-range` entitlement in the consuming app.
- * - **Desktop / unsupported**: Always returns `null` (not applicable).
+ * - **Desktop / unsupported**: Always returns `"notApplicable"`.
  *
  * @param minimumAge - The minimum age threshold to check (e.g., `13` for 13+).
  *   Must be ≥ 2. On iOS, this becomes the single age gate passed to `requestAgeRange`.
  *
- * @returns A promise resolving to:
- *   - `true`  — User is confirmed at or above `minimumAge`
- *   - `null`  — Age cannot be determined (feature not available in region, platform
- *               doesn't support age signals, or user declined to share)
+ * @returns A promise resolving to an {@link AgeSignal}:
+ *   - `"meetsAgeGate"`  — old enough, or a guardian-approved supervised account
+ *   - `"belowAgeGate"`  — confirmed under `minimumAge`, or supervised approval pending/denied
+ *   - `"notApplicable"` — no usable signal (region/platform/declined/undetermined); apply your default
  *
- * @throws {BelowMinimumAgeError} when the user is confirmed below `minimumAge`
  * @throws {ApiNotAvailableError} when the platform API is unavailable
  * @throws {NetworkError} on network failures (Android)
  * @throws {PlayStoreNotFoundError} when Play Store is missing (Android)
@@ -91,27 +95,28 @@ export type AgeSignalsError =
  *
  * @example
  * ```typescript
- * import { checkAgeRange } from 'tauri-plugin-age-signals'
+ * import { ageSignal } from 'tauri-plugin-age-signals'
  *
  * try {
- *   const eligible = await checkAgeRange(13)
- *   if (eligible === true) {
- *     // User is 13 or older — enable age-appropriate content
- *   } else {
- *     // null: not applicable in this region/platform — apply default restrictions
+ *   switch (await ageSignal(13)) {
+ *     case 'meetsAgeGate':
+ *       // Old enough, or guardian-approved — allow.
+ *       break
+ *     case 'belowAgeGate':
+ *       // Confirmed under 13 (or supervised approval pending/denied) — restrict.
+ *       break
+ *     case 'notApplicable':
+ *       // No signal here — apply your own default policy.
+ *       break
  *   }
  * } catch (error: unknown) {
  *   const e = error as AgeSignalsError
- *   if (e.type === 'BelowMinimumAge') {
- *     // User is confirmed under 13 — restrict access
- *   }
+ *   // Genuine failure (network, Play Store missing, etc.) — could not get an answer.
  * }
  * ```
  */
-export async function checkAgeRange(
-  minimumAge: number
-): Promise<boolean | null> {
-  return await invoke<boolean | null>("plugin:age-signals|check_age_range", {
+export async function ageSignal(minimumAge: number): Promise<AgeSignal> {
+  return await invoke<AgeSignal>("plugin:age-signals|age_signal", {
     minimumAge,
   });
 }

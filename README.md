@@ -11,7 +11,7 @@ A [Tauri v2](https://v2.tauri.app) plugin for **age-range verification** using p
 | iOS | 26+ | Apple `DeclaredAgeRange` framework | Yes — native system consent sheet |
 | Desktop / other | Any | Not applicable | — |
 
-> **Regulated regions (as of 2026):** Brazil (March 2026), Utah, USA (May 2026), Louisiana, USA (July 2026). In all other regions the API returns `null` (not applicable), so your app should treat `null` as "apply default restrictions."
+> **Regulated regions (as of 2026):** Brazil (March 2026), Utah, USA (May 2026), Louisiana, USA (July 2026). In all other regions the API returns `"notApplicable"`, so your app should treat `"notApplicable"` as "apply default restrictions."
 
 ---
 
@@ -48,9 +48,9 @@ Age verification regulations in several jurisdictions require apps to determine 
 
 - **Android**: The [Google Play Age Signals SDK](https://developer.android.com/google/play/integrity/age-signals) queries the device's Play Store account data silently — no UI is shown to the user. The SDK returns an age range (e.g., "21–35") or a supervised account status. The plugin interprets this against the `minimumAge` you specify.
 - **iOS 26+**: Apple's [`DeclaredAgeRange`](https://developer.apple.com/documentation/declaredagerange) framework presents a system sheet asking the user to consent to sharing their age range with the app. The result is either a confirmed age lower-bound or a declined/undetermined state.
-- **Desktop / unsupported mobile**: Returns `null` immediately — no network call, no UI.
+- **Desktop / unsupported mobile**: Returns `"notApplicable"` immediately — no network call, no UI.
 
-The plugin surfaces a single unified API regardless of platform. Your app code only needs to handle three outcomes: **eligible**, **not applicable** (`null`), and **error** (thrown exception).
+The plugin surfaces a single unified API regardless of platform. Your app code handles three resolved outcomes — `"meetsAgeGate"`, `"belowAgeGate"`, `"notApplicable"` — plus thrown errors for genuine failures.
 
 ---
 
@@ -138,7 +138,7 @@ The consuming app must have the **Declared Age Range** entitlement. In Xcode:
 2. Select your app target → **Signing & Capabilities**
 3. Click **+ Capability** and add **Declared Age Range**
 
-This adds `com.apple.developer.declared-age-range` to your `.entitlements` file. Without this entitlement the iOS implementation returns `null` rather than presenting the consent sheet.
+This adds `com.apple.developer.declared-age-range` to your `.entitlements` file. Without this entitlement the iOS implementation returns `"notApplicable"` rather than presenting the consent sheet.
 
 You can also add it manually to your entitlements file:
 
@@ -165,30 +165,31 @@ Without this key the system sheet will not be displayed and the call will fail w
 ### TypeScript / JavaScript
 
 ```typescript
-import { checkAgeRange } from 'tauri-plugin-age-signals'
+import { ageSignal } from 'tauri-plugin-age-signals'
 import type { AgeSignalsError } from 'tauri-plugin-age-signals'
 
 try {
-  const result = await checkAgeRange(13)
+  switch (await ageSignal(13)) {
+    case 'meetsAgeGate':
+      // Old enough, or a guardian-approved supervised account
+      showAgeGatedContent()
+      break
 
-  if (result === true) {
-    // User is confirmed 13 or older
-    showAgeGatedContent()
-  } else {
-    // result === null: age cannot be determined
-    // This happens on desktop, non-regulated regions, or if the user declined (iOS)
-    applyDefaultRestrictions()
+    case 'belowAgeGate':
+      // Confirmed under 13, or supervised approval pending/denied
+      blockAccess()
+      break
+
+    case 'notApplicable':
+      // Age cannot be determined: desktop, non-regulated region, user declined (iOS),
+      // sideloaded (Android), or platform has no signal. Apply your own default.
+      applyDefaultRestrictions()
+      break
   }
 } catch (error: unknown) {
   const e = error as AgeSignalsError
 
   switch (e.type) {
-    case 'BelowMinimumAge':
-      // User is confirmed under 13
-      console.log(`User is below age ${e.data.minimum_age}`)
-      blockAccess()
-      break
-
     case 'NetworkError':
       // Android: transient network failure — safe to retry
       console.warn('Network error:', e.data)
@@ -226,19 +227,22 @@ try {
 
 ### Return Values
 
+`ageSignal()` resolves to an `AgeSignal`:
+
 | Value | Meaning |
 |---|---|
-| `true` | User is **confirmed at or above** `minimumAge` |
-| `null` | Age **cannot be determined**: feature unavailable in region, platform doesn't support age signals, user declined to share (iOS), or app is sideloaded (Android) |
-| *(throws)* | See [Error Reference](#error-reference) below |
+| `"meetsAgeGate"` | User is **permitted**: confirmed at or above `minimumAge`, or a supervised account approved by a guardian |
+| `"belowAgeGate"` | User is **not permitted**: confirmed below `minimumAge`, or a supervised account whose guardian approval is pending or denied |
+| `"notApplicable"` | Age **cannot be determined**: feature unavailable in region, platform doesn't support age signals, user declined to share (iOS), or app is sideloaded (Android) |
 
-> **Design guidance:** When the result is `null`, apply your **most restrictive** default. The plugin never returns `false` — the only way to know a user is under age is via the `BelowMinimumAge` exception.
+Genuine failures (network, Play Store missing, etc.) are thrown — see [Error Reference](#error-reference) below.
+
+> **Design guidance:** When the result is `"notApplicable"`, apply your **most restrictive** default. Errors represent the *absence* of an answer, not a "too young" verdict — only `"belowAgeGate"` confirms a user is under age.
 
 ### Error Reference
 
 | Error type | When thrown | Platform |
 |---|---|---|
-| `BelowMinimumAge` | User is confirmed below `minimumAge`. `data.minimum_age` contains the threshold. | Android, iOS |
 | `ApiNotAvailable` | Play Services or the Age Signals API is too old to support the request. | Android |
 | `NetworkError` | Transient network failure while querying age signals. | Android |
 | `PlayStoreNotFound` | Google Play Store is not installed on the device. | Android |
@@ -257,54 +261,57 @@ The plugin uses the [Google Play Age Signals SDK](https://developer.android.com/
 **Requirements:**
 - Device must have Google Play Services installed
 - App must be installed through the Play Store (not sideloaded)
-- Device must be in a regulated region (or the SDK returns `null`)
+- Device must be in a regulated region (or the SDK returns `"notApplicable"`)
 - Minimum Android API level: 23 (Android 6.0)
 
 **Age range interpretation:**
 
 The Play API returns an age range (e.g., lower bound 21, upper bound 35) rather than an exact age. The plugin resolves this against `minimumAge` conservatively:
 
+For `VERIFIED` and `DECLARED` users the Play API returns an age range (e.g., lower bound 21, upper bound 35) rather than an exact age. The plugin resolves this against `minimumAge` conservatively:
+
 | Scenario | Result |
 |---|---|
-| Range is entirely at or above `minimumAge` | `true` |
-| Range spans the `minimumAge` boundary | `true` (conservative — no false negatives) |
-| Range is entirely below `minimumAge` | throws `BelowMinimumAge` |
-| `SUPERVISED_APPROVAL_DENIED` status | throws `BelowMinimumAge` |
-| Status unknown or device not in regulated region | `null` |
+| Range is entirely at or above `minimumAge` | `"meetsAgeGate"` |
+| Range spans the `minimumAge` boundary | `"meetsAgeGate"` (conservative — no false negatives) |
+| Range is entirely below `minimumAge` | `"belowAgeGate"` |
+| `SUPERVISED` status (guardian-managed account) | `"meetsAgeGate"` (parental consent, regardless of age) |
+| `SUPERVISED_APPROVAL_PENDING` or `SUPERVISED_APPROVAL_DENIED` | `"belowAgeGate"` (approval not granted) |
+| `UNKNOWN` status, or device not in a regulated region | `"notApplicable"` |
 
-The conservative interpretation (range spanning the boundary → `true`) avoids incorrectly locking out legitimate users. If your use-case requires stricter enforcement, treat a `null` result as restricted.
+The conservative interpretation (range spanning the boundary → `"meetsAgeGate"`) avoids incorrectly locking out legitimate users. If your use-case requires stricter enforcement, treat `"notApplicable"` as restricted.
 
-**Supervised accounts:**
+**Supervised accounts (Family Link):**
 
-Devices managed by Family Link may return `SUPERVISED_APPROVAL_PENDING` (treated as `null`) or `SUPERVISED_APPROVAL_DENIED` (treated as `BelowMinimumAge`).
+A `SUPERVISED` account is guardian-managed and treated as **permitted** — parental consent overrides the age gate, so a supervised minor below `minimumAge` still resolves to `"meetsAgeGate"`. While guardian approval for a significant change is outstanding the status is `SUPERVISED_APPROVAL_PENDING`, and an explicit rejection is `SUPERVISED_APPROVAL_DENIED`; both resolve to `"belowAgeGate"` until the approval is granted.
 
 ### iOS
 
 The plugin uses Apple's [`DeclaredAgeRange`](https://developer.apple.com/documentation/declaredagerange) framework introduced in iOS 26.
 
 **Requirements:**
-- iOS 26 or later (earlier versions always return `null`)
+- iOS 26 or later (earlier versions always return `"notApplicable"`)
 - App must have `com.apple.developer.declared-age-range` entitlement
 - `NSAgeRangeUsageDescription` must be set in `Info.plist`
 - Device must be in an eligible region (per Apple's policy)
 
 **User interaction:**
 
-When all requirements are met, calling `checkAgeRange()` presents a **system-managed consent sheet** asking the user to share their age range. The user can decline; in that case the call returns `null` (not an error).
+When all requirements are met, calling `ageSignal()` presents a **system-managed consent sheet** asking the user to share their age range. The user can decline; in that case the call returns `"notApplicable"` (not an error).
 
 **Age interpretation:**
 
 | Scenario | Result |
 |---|---|
-| User consents and lower bound ≥ `minimumAge` | `true` |
-| User consents and lower bound is nil (below range) | throws `BelowMinimumAge` |
-| User declines to share | `null` |
-| Device not eligible (non-regulated region, parental controls, etc.) | `null` |
-| Framework not available (iOS < 26) | `null` |
+| User consents and lower bound ≥ `minimumAge` | `"meetsAgeGate"` |
+| User consents and lower bound is nil (below range) | `"belowAgeGate"` |
+| User declines to share | `"notApplicable"` |
+| Device not eligible (non-regulated region, parental controls, etc.) | `"notApplicable"` |
+| Framework not available (iOS < 26) | `"notApplicable"` |
 
 ### Desktop
 
-Desktop platforms (macOS, Windows, Linux) are not subject to mobile age signal regulations. `checkAgeRange()` always returns `null` immediately with no network call or user interaction.
+Desktop platforms (macOS, Windows, Linux) are not subject to mobile age signal regulations. `ageSignal()` always returns `"notApplicable"` immediately with no network call or user interaction.
 
 ---
 
@@ -432,7 +439,7 @@ yarn tauri dev          # Development mode with hot reload
 yarn tauri build        # Production build
 ```
 
-On desktop, `checkAgeRange()` always returns `null`. Use the desktop build to validate your error handling UI and `null` path.
+On desktop, `ageSignal()` always returns `"notApplicable"`. Use the desktop build to validate your error handling UI and `null` path.
 
 **Android:**
 
@@ -446,7 +453,7 @@ yarn tauri android dev
 yarn tauri android build
 ```
 
-Testing on a real device in a regulated region (Brazil, Utah, Louisiana) is required to exercise the live API path. In non-regulated regions or on emulators, `checkAgeRange()` returns `null`.
+Testing on a real device in a regulated region (Brazil, Utah, Louisiana) is required to exercise the live API path. In non-regulated regions or on emulators, `ageSignal()` returns `"notApplicable"`.
 
 **iOS:**
 
@@ -463,7 +470,7 @@ yarn tauri ios dev
 yarn tauri ios build
 ```
 
-The consent sheet only appears on physical devices running iOS 26+ in an eligible region. On the simulator, or on devices in non-eligible regions, `checkAgeRange()` returns `null`.
+The consent sheet only appears on physical devices running iOS 26+ in an eligible region. On the simulator, or on devices in non-eligible regions, `ageSignal()` returns `"notApplicable"`.
 
 ---
 
