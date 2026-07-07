@@ -121,11 +121,29 @@ class AgeSignalsPlugin: Plugin {
             return
         }
 
+        // All DeclaredAgeRange type usage is confined to this fully
+        // @available-annotated helper. Referencing AgeRangeService types
+        // (even in locals) inside a non-@available function forces the
+        // compiler to emit type-metadata symbolic references into that
+        // function's frame; on devices below iOS 26.2 the weak-linked
+        // framework's metadata symbols are null and the Swift runtime
+        // crashes while demangling them ("missing weak symbol"). Gating
+        // the whole function on @available keeps that metadata off the
+        // ungated code path.
+        let state = await queryDeclaredAgeRange(minimumAge: minimumAge)
+        invoke.resolve(state.toJSObject())
+        #else
+        invoke.resolve(AgeSignalsState.notApplicable.toJSObject())
+        #endif
+    }
+
+    #if canImport(DeclaredAgeRange)
+    @available(iOS 26.2, macOS 26, *)
+    private func queryDeclaredAgeRange(minimumAge: Int) async -> AgeSignalsState {
         do {
             let eligible = try await AgeRangeService.shared.isEligibleForAgeFeatures
             guard eligible else {
-                invoke.resolve(AgeSignalsState.notApplicable.toJSObject())
-                return
+                return .notApplicable
             }
 
             let vc = rootViewController()
@@ -134,16 +152,12 @@ class AgeSignalsPlugin: Plugin {
                 in: vc
             )
 
-            let state = AgeSignalsMapper.mapResponse(response, minimumAge: minimumAge)
-            invoke.resolve(state.toJSObject())
+            return AgeSignalsMapper.mapResponse(response, minimumAge: minimumAge)
         } catch {
-            let state = AgeSignalsMapper.mapError(error)
-            invoke.resolve(state.toJSObject())
+            return AgeSignalsMapper.mapError(error)
         }
-        #else
-        invoke.resolve(AgeSignalsState.notApplicable.toJSObject())
-        #endif
     }
+    #endif
 
     private func rootViewController() -> UIViewController {
         UIApplication.shared

@@ -34,6 +34,7 @@
       "icons/icon.ico"
     ],
     "iOS": {
+      "minimumSystemVersion": "26.0",
       "infoPlist": "Info.ios.plist"
     }
   }

@@ -2,7 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>com.apple.developer.declared-age-range</key>
-	<true/>
+	<!-- Required: iOS aborts the process (SIGABRT) the moment requestAgeRange
+	     tries to present without this key. The entitlement itself belongs in
+	     the .entitlements file, not here. -->
+	<key>NSAgeRangeUsageDescription</key>
+	<string>This demo uses your age range to show age-appropriate content.</string>
 </dict>
 </plist>
