@@ -172,6 +172,6 @@ class AgeSignalsPlugin: Plugin {
 }
 
 @_cdecl("init_plugin_age_signals")
-func initPlugin() -> Plugin {
+public func initPlugin() -> Plugin {
     return AgeSignalsPlugin()
 }
